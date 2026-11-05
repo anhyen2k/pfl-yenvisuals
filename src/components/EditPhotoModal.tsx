@@ -15,8 +15,10 @@ import {
   Sparkles,
   Sliders,
   Check,
+  Upload,
 } from 'lucide-react';
-import { PhotoItem, PhotoCategory } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { uploadPhotoToStorage } from '../services/firebase';
 
 interface EditPhotoModalProps {
   isOpen: boolean;
@@ -34,11 +36,20 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
   const [formData, setFormData] = useState<PhotoItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [tagsInput, setTagsInput] = useState('');
+  // File moi nguoi dung chon de thay anh: chi upload khi submit, khong luu base64.
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const [newPreview, setNewPreview] = useState('');
+  const [error, setError] = useState('');
+  const [imageBroken, setImageBroken] = useState(false);
 
   useEffect(() => {
     if (photo) {
       setFormData({ ...photo });
       setTagsInput(photo.tags ? photo.tags.join(', ') : '');
+      setNewFile(null);
+      setNewPreview('');
+      setError('');
+      setImageBroken(false);
     }
   }, [photo]);
 
@@ -67,12 +78,54 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
     setFormData((prev) => (prev ? { ...prev, tags: parsedTags } : null));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Kích thước ảnh không vượt quá 8MB');
+      return;
+    }
+    // Giu File goc de upload len Storage khi submit; preview base64 chi de xem truoc.
+    setNewFile(file);
+    setImageBroken(false);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setNewPreview(reader.result);
+        setError('');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearNewFile = () => {
+    setNewFile(null);
+    setNewPreview('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent | React.MouseEvent) => {
     e.preventDefault();
     if (!formData) return;
     setIsSaving(true);
+    setError('');
     try {
-      onSave(formData);
+      let updatedPhoto = formData;
+      if (newFile) {
+        // Co file moi: upload len Firebase Storage lay downloadURL lam anh moi.
+        let downloadURL: string;
+        try {
+          downloadURL = await uploadPhotoToStorage(newFile, formData.id);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          setError(
+            `Tải ảnh lên Storage thất bại: ${detail} Vui lòng kiểm tra Storage rules đã deploy chưa rồi thử lại.`
+          );
+          setIsSaving(false);
+          return;
+        }
+        updatedPhoto = { ...formData, image: downloadURL };
+      }
+      onSave(updatedPhoto);
       onClose();
     } finally {
       setIsSaving(false);
@@ -113,18 +166,34 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+          {error && (
+            <div className="p-3 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs border border-rose-200 dark:border-rose-900">
+              {error}
+            </div>
+          )}
+
           {/* Image preview & URL */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
             <div className="md:col-span-1 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 aspect-3/4 relative group">
-              <img
-                src={formData.image}
-                alt={formData.title}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80';
-                }}
-              />
+              {newPreview ? (
+                <img
+                  src={newPreview}
+                  alt={formData.title}
+                  className="w-full h-full object-cover"
+                />
+              ) : formData.image && !imageBroken ? (
+                <img
+                  src={formData.image}
+                  alt={formData.title}
+                  className="w-full h-full object-cover"
+                  onError={() => setImageBroken(true)}
+                />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-neutral-400">
+                  <ImageIcon className="w-8 h-8" />
+                  <span className="text-xs">Chưa có ảnh</span>
+                </div>
+              )}
               <div className="absolute inset-0 bg-black/40 flex items-end p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                 <span className="text-[11px] text-white font-mono truncate">{formData.title}</span>
               </div>
@@ -144,11 +213,44 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                       value={formData.image}
                       onChange={handleChange}
                       required
-                      placeholder="https://images.unsplash.com/..."
+                      placeholder="https://..."
                       className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-mono"
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Upload anh moi: neu chon file thi upload len Storage khi luu, thay anh cu */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1">
+                  Hoặc tải lên ảnh mới (thay ảnh hiện tại)
+                </label>
+                {newPreview ? (
+                  <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+                    <Check className="w-4 h-4" />
+                    <span>Đã chọn ảnh mới — sẽ tải lên Storage khi bấm Lưu.</span>
+                    <button
+                      type="button"
+                      onClick={clearNewFile}
+                      className="ml-auto px-2 py-1 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 cursor-pointer"
+                    >
+                      Hủy ảnh mới
+                    </button>
+                  </div>
+                ) : (
+                  <label className="border-2 border-dashed border-neutral-300 dark:border-neutral-700 hover:border-amber-500 rounded-lg p-3 flex items-center justify-center gap-2 cursor-pointer transition-colors text-center">
+                    <Upload className="w-4 h-4 text-neutral-400" />
+                    <span className="text-xs text-neutral-600 dark:text-neutral-300">
+                      Bấm để chọn file ảnh từ máy tính (JPEG, PNG, WebP — tối đa 8MB)
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -192,11 +294,13 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                     onChange={handleChange}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
                   >
-                    <option value="aodai-trang">Áo Dài Trắng Nữ Sinh</option>
-                    <option value="kiyieu-nhom">Kỉ Yếu Nhóm Lớp / Cử Nhân</option>
-                    <option value="cophuc">Cổ Phục & Việt Phục</option>
-                    <option value="aodai-pho">Áo Dài Phố Cổ & Di Tích</option>
-                    <option value="nang-tho">Nàng Thơ & Chân Dung Ngoại Cảnh</option>
+                    {(Object.entries(CATEGORY_LABELS) as [PhotoCategory, string][]).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      )
+                    )}
                   </select>
                 </div>
                 <div>

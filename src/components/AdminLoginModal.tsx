@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Lock, X, AlertCircle } from 'lucide-react';
 import { loginWithGoogle } from '../services/firebase';
+import { SITE_CONFIG } from '../config/site';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
-  photographerEmail = 'anhyenk26@gmail.com',
+  photographerEmail = SITE_CONFIG.photographerEmail,
 }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -38,8 +39,26 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       }
     } catch (err: any) {
       console.warn('Google sign-in:', err);
-      // If user closed popup or cancelled, do not alarm them
-      if (err?.code !== 'auth/popup-closed-by-user') {
+      // Nguoi dung tu dong popup thi khong hien loi; cac loi khac hien ma loi
+      // that kem huong dan khac phuc ngan gon tuong ung.
+      if (err?.code === 'auth/popup-closed-by-user') {
+        // Khong lam gi: nguoi dung tu dong popup.
+      } else if (err?.code) {
+        const guidanceByCode: Record<string, string> = {
+          'auth/unauthorized-domain':
+            'Domain anhyen2k.github.io chưa được thêm vào Firebase Authentication > Settings > Authorized domains.',
+          'auth/operation-not-allowed':
+            'Chưa bật đăng nhập Google trong Firebase Authentication > Sign-in method.',
+          'auth/popup-blocked':
+            'Trình duyệt đã chặn popup, hãy cho phép popup cho trang này rồi thử lại.',
+        };
+        const guidance = guidanceByCode[err.code];
+        setErrorMsg(
+          guidance
+            ? `Không thể đăng nhập bằng tài khoản Google (${err.code}). ${guidance}`
+            : `Không thể đăng nhập bằng tài khoản Google (${err.code}). Vui lòng thử lại.`
+        );
+      } else {
         setErrorMsg('Không thể đăng nhập bằng tài khoản Google. Vui lòng thử lại.');
       }
     } finally {
@@ -95,7 +114,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           )}
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center">
-            Chi tai khoan Google <strong className="text-neutral-800 dark:text-neutral-200">anhyenk26@gmail.com</strong> moi
+            Chi tai khoan Google <strong className="text-neutral-800 dark:text-neutral-200">{SITE_CONFIG.photographerEmail}</strong> moi
             vao duoc trang quan tri.
           </p>
 
@@ -124,7 +143,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span>{isGoogleLoading ? 'Dang Dang Nhap Google...' : 'Dang Nhap Voi Google (anhyenk26@gmail.com)'}</span>
+            <span>{isGoogleLoading ? 'Dang Dang Nhap Google...' : `Dang Nhap Voi Google (${SITE_CONFIG.photographerEmail})`}</span>
           </button>
 
           <button

@@ -19,6 +19,11 @@ import {
   generateWebGmailUrl,
   generateDirectMailtoUrl,
   getRolePermissions,
+  normalizePhone,
+  isValidVietnamesePhone,
+  calculateEstimatedPrice,
+  calculateDepositAmount,
+  tomorrowISO,
   PhotoItem,
 } from './portfolioLogic.js';
 import * as portfolioLogicModule from './portfolioLogic.js';
@@ -140,6 +145,7 @@ test('validateBookingInquiry validates client booking inputs', () => {
     phone: '0987654321',
     packageType: 'kiyieu-lop' as const,
     preferredDate: '2026-11-25',
+    timeSlot: 'sang-9-11',
     location: 'Trường ĐH Sư Phạm Hà Nội & Hoàng Thành Thăng Long',
     message: 'Lớp 40 người cần chụp kỉ yếu áo dài và áo cử nhân',
   };
@@ -149,9 +155,10 @@ test('validateBookingInquiry validates client booking inputs', () => {
   const validWithShortMessage = {
     clientName: 'Kim chi',
     email: 'kimchi@gmail.com',
-    phone: '01212320',
+    phone: '0912345678',
     packageType: 'aodai-solo' as const,
     preferredDate: '2027-02-01',
+    timeSlot: 'chieu-14-16',
     location: 'công viên',
     groupSize: '1',
     message: 'hi',
@@ -165,7 +172,9 @@ test('validateBookingInquiry validates client booking inputs', () => {
     clientName: 'Nguyễn Thu Trang',
     email: 'thutrang@gmail.com',
     phone: '0988776655',
+    packageType: 'aodai-solo' as const,
     preferredDate: '2026-12-01',
+    timeSlot: 'sang-7-9',
     message: '',
   };
   assert.equal(validateBookingInquiry(validEmptyMessage).isValid, true);
@@ -347,3 +356,63 @@ test('getRolePermissions strictly protects admin actions and allows guest browsi
   assert.equal(adminPerms.canViewGallery, true);
 });
 
+
+test('phone VN: normalize + validate 10 so dau 03/05/07/08/09', () => {
+  assert.equal(normalizePhone('0912 888 266'), '0912888266');
+  assert.equal(normalizePhone('+84 912 888 266'), '0912888266');
+  assert.equal(isValidVietnamesePhone('0912888266'), true);
+  assert.equal(isValidVietnamesePhone('01212320'), false);
+  assert.equal(isValidVietnamesePhone('1234567890'), false);
+  assert.equal(validateBookingInquiry({ clientName: 'A B', email: 'a@b.com', phone: '01212320', packageType: 'aodai-solo', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9' }).isValid, false);
+});
+
+test('validate chan ngay qua khu va bat khung gio tru photobook', () => {
+  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9' };
+  assert.equal(validateBookingInquiry(base).isValid, true);
+  assert.equal(validateBookingInquiry({ ...base, preferredDate: '2020-01-01' }).isValid, false);
+  assert.equal(validateBookingInquiry({ ...base, timeSlot: undefined }).isValid, false);
+  assert.equal(validateBookingInquiry({ ...base, packageType: 'photobook-print', timeSlot: undefined }).isValid, true);
+});
+
+test('gia nhom vuot 15 nguoi +80k/nguoi va coc 30%', () => {
+  assert.equal(calculateEstimatedPrice('kiyieu-lop', 15), 1200000);
+  assert.equal(calculateEstimatedPrice('kiyieu-lop', 20), 1600000);
+  assert.equal(calculateEstimatedPrice('aodai-solo', 1), 650000);
+  assert.equal(calculateDepositAmount(650000), 195000);
+  assert.equal(calculateDepositAmount(1200000), 360000);
+  const { lead } = createBookingLead({ clientName: 'Nhom 20', email: 'n@x.com', phone: '0912345678', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', groupCount: 20, timeSlot: 'sang-9-11', message: '' } as any, 'anhyenk26@gmail.com');
+  assert.equal(lead.estimatedPrice, 1600000);
+  assert.equal(lead.depositAmount, 480000);
+  assert.equal(lead.balance, 1600000);
+  assert.equal(lead.paidAmount, 0);
+});
+
+test('filterPhotos tim theo series va goi', () => {
+  const photos: PhotoItem[] = [
+    { ...mockPhotos[0], seriesId: 'series-co-phuc' },
+    { ...mockPhotos[1], seriesId: 'series-nien-thieu' },
+  ];
+  const bySeries = filterPhotos(photos, 'all', 'co-phuc', false, [], { 'series-co-phuc': 'Dấu Xưa Ngàn Năm Cổ Phục' });
+  assert.equal(bySeries.length, 1);
+  assert.equal(bySeries[0].id, 'photo-1');
+});
+
+test('filterLeads due-today chi lay don hen goi lai hom nay', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const leads: any[] = [
+    { id: '1', clientName: 'A', phone: '0911', email: 'a@x.com', status: 'new', nextFollowUpAt: today },
+    { id: '2', clientName: 'B', phone: '0922', email: 'b@x.com', status: 'new', nextFollowUpAt: '2099-01-01' },
+    { id: '3', clientName: 'C', phone: '0933', email: 'c@x.com', status: 'completed', nextFollowUpAt: today },
+  ];
+  assert.equal(filterLeads(leads, 'due-today').length, 1);
+  assert.equal(filterLeads(leads, 'due-today')[0].id, '1');
+});
+
+test('dashboard stats them tien that da thu / con phai thu', () => {
+  const stats = calculateDashboardStats([
+    { id: '1', status: 'deposited', estimatedPrice: 1200000, depositAmount: 360000, paidAmount: 360000, balance: 840000 },
+    { id: '2', status: 'new', estimatedPrice: 650000, depositAmount: 195000, paidAmount: 0, balance: 650000 },
+  ] as any, 5);
+  assert.equal(stats.totalPaid, 360000);
+  assert.equal(stats.totalBalance, 1490000);
+});

@@ -12,6 +12,7 @@ interface DeletePhotoModalProps {
   photo: PhotoItem | null;
   onClose: () => void;
   onConfirm: (photoId: string) => void;
+  seriesTitle?: string;
 }
 
 export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
@@ -19,8 +20,10 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
   photo,
   onClose,
   onConfirm,
+  seriesTitle,
 }) => {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [imageBroken, setImageBroken] = useState(false);
 
   if (!isOpen || !photo) return null;
 
@@ -67,16 +70,17 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
 
         {/* Photo Preview Mini-Card */}
         <div className="flex items-center gap-3 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
-          <div className="w-16 h-16 rounded-lg overflow-hidden bg-neutral-200 dark:bg-neutral-800 shrink-0">
-            <img
-              src={photo.image}
-              alt={photo.title}
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src =
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
-              }}
-            />
+          <div className="w-16 h-16 rounded-lg overflow-hidden bg-neutral-200 dark:bg-neutral-800 shrink-0 flex items-center justify-center">
+            {photo.image && !imageBroken ? (
+              <img
+                src={photo.image}
+                alt={photo.title}
+                className="w-full h-full object-cover"
+                onError={() => setImageBroken(true)}
+              />
+            ) : (
+              <span className="text-[10px] text-neutral-400 text-center px-1">Chưa có ảnh</span>
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <h4 className="text-xs font-semibold text-neutral-900 dark:text-white truncate">
@@ -93,9 +97,25 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span>Thao tác này đồng bộ ngay lập tức và không thể hoàn tác.</span>
+        <div className="space-y-2">
+          {photo.featured && (
+            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+              <span>
+                Ảnh này đang là ảnh nổi bật (Hero). Xoá xong trang chủ sẽ dùng ảnh khác.
+              </span>
+            </div>
+          )}
+          {photo.seriesId && (
+            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+              <span>Ảnh thuộc series: {seriesTitle || photo.seriesId}.</span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Không hoàn tác được sau khi xoá.</span>
+          </div>
         </div>
 
         {/* Actions */}

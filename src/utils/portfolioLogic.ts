@@ -4,6 +4,68 @@
  */
 
 import * as XLSX from 'xlsx';
+import { SITE_CONFIG } from '../config/site';
+
+// --- Bang dung chung (diem 2, 5, 8, 9) — chi Ha Noi, khong them Sai Gon ---
+export const CATEGORY_LABELS: Record<Exclude<PhotoCategory, 'all'>, string> = {
+  'aodai-trang': 'Áo Dài Trắng',
+  'kiyieu-nhom': 'Kỉ Yếu Nhóm Lớp',
+  'cophuc': 'Cổ Phục Di Sản',
+  'aodai-pho': 'Áo Dài Dạo Phố',
+  'nang-tho': 'Nàng Thơ Cận Cảnh',
+};
+
+export const HANOI_LOCATIONS: string[] = [
+  'Hoàng Thành Thăng Long',
+  'Văn Miếu - Quốc Tử Giám',
+  'Phan Đình Phùng',
+  'Hồ Tây / Đầm Sen',
+  'Phố Cổ',
+  'Trường học (ghi rõ tên trường)',
+  'Khác',
+];
+
+export const TIME_SLOTS: { id: string; label: string }[] = [
+  { id: 'sang-7-9', label: 'Sáng 7h – 9h' },
+  { id: 'sang-9-11', label: 'Sáng 9h – 11h' },
+  { id: 'chieu-14-16', label: 'Chiều 14h – 16h' },
+  { id: 'chieu-16-18', label: 'Chiều 16h – 18h' },
+];
+
+export function timeSlotLabel(id?: string): string {
+  return TIME_SLOTS.find((t) => t.id === id)?.label || id || '';
+}
+
+// Series -> goi co san (khong bia goi moi). Dung de hien gia o SeriesSection.
+export const SERIES_PACKAGE: Record<string, BookingInquiry['packageType']> = {
+  'series-nien-thieu': 'kiyieu-lop',
+  'series-ha-noi-thu': 'aodai-solo',
+  'series-co-phuc': 'cophuc-heritage',
+  'series-sen-tay-ho': 'aodai-solo',
+};
+
+export function tomorrowISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// --- SDT Viet Nam (diem 13) ---
+export function normalizePhone(raw: string): string {
+  let digits = (raw || '').replace(/[^0-9]/g, '');
+  if (digits.startsWith('84')) digits = '0' + digits.slice(2);
+  return digits;
+}
+
+export function isValidVietnamesePhone(raw: string): boolean {
+  const digits = normalizePhone(raw);
+  return /^0(3|5|7|8|9)[0-9]{8}$/.test(digits);
+}
+
 
 export type PhotoCategory =
   | 'all'
@@ -46,7 +108,22 @@ export interface BookingInquiry {
   preferredDate: string;
   location: string;
   groupSize?: string;
+  groupCount?: number;
+  timeSlot?: string;
   message: string;
+}
+
+// Tinh gia uoc tinh: goi nhom 5-15 ban gia goc 1.200k, vuot 15 thi +80k/nguoi vuot.
+export function calculateEstimatedPrice(packageType: BookingInquiry['packageType'], groupCount?: number): number {
+  const base = getPackageDetails(packageType).basePriceVND;
+  if (packageType === 'kiyieu-lop' && groupCount && groupCount > 15) {
+    return base + (groupCount - 15) * 80000;
+  }
+  return base;
+}
+
+export function calculateDepositAmount(estimatedPrice: number): number {
+  return Math.round((estimatedPrice * 0.3) / 1000) * 1000;
 }
 
 /**
@@ -57,7 +134,8 @@ export function filterPhotos(
   category: string,
   searchQuery: string = '',
   onlyFavorites: boolean = false,
-  favoriteIds: string[] = []
+  favoriteIds: string[] = [],
+  seriesTitleById: Record<string, string> = {}
 ): PhotoItem[] {
   return photos.filter((photo) => {
     // Category check
@@ -78,7 +156,13 @@ export function filterPhotos(
       const matchLocation = photo.location.toLowerCase().includes(q);
       const matchCamera = photo.camera.toLowerCase().includes(q);
       const matchTags = photo.tags.some((t) => t.toLowerCase().includes(q));
-      if (!matchTitle && !matchVnTitle && !matchLocation && !matchCamera && !matchTags) {
+      const seriesTitle = (photo.seriesId ? seriesTitleById[photo.seriesId] || '' : '').toLowerCase();
+      const matchSeries = (photo.seriesId || '').toLowerCase().includes(q) || seriesTitle.includes(q);
+      const pkgName = photo.seriesId && SERIES_PACKAGE[photo.seriesId]
+        ? getPackageDetails(SERIES_PACKAGE[photo.seriesId]).name.toLowerCase()
+        : '';
+      const matchPackage = pkgName.includes(q);
+      if (!matchTitle && !matchVnTitle && !matchLocation && !matchCamera && !matchTags && !matchSeries && !matchPackage) {
         return false;
       }
     }
@@ -215,13 +299,20 @@ export function validateBookingInquiry(inquiry: Partial<BookingInquiry>): {
     errors.email = 'Vui lòng nhập địa chỉ email hợp lệ nhận ảnh và hợp đồng (vd: example@gmail.com)';
   }
 
-  const phoneRegex = /^[0-9+\s\-()]{8,15}$/;
-  if (!inquiry.phone || !phoneRegex.test(inquiry.phone.trim())) {
-    errors.phone = 'Vui lòng nhập số điện thoại hoặc Zalo liên hệ (từ 8 đến 15 chữ số)';
+  if (!inquiry.phone || !isValidVietnamesePhone(inquiry.phone)) {
+    errors.phone = 'Vui lòng nhập số điện thoại Việt Nam 10 số, đầu 03/05/07/08/09 (vd: 0912 888 266)';
   }
 
   if (!inquiry.preferredDate) {
-    errors.preferredDate = 'Vui lòng chọn ngày dự kiến chụp kỉ yếu / áo dài';
+    errors.preferredDate = inquiry.packageType === 'photobook-print'
+      ? 'Vui lòng chọn ngày muốn nhận ảnh'
+      : 'Vui lòng chọn ngày dự kiến chụp kỉ yếu / áo dài';
+  } else if (inquiry.preferredDate < todayISO()) {
+    errors.preferredDate = 'Ngày đã chọn đã qua, vui lòng chọn ngày từ hôm nay trở đi (nên chọn từ ngày mai).';
+  }
+
+  if (inquiry.packageType && inquiry.packageType !== 'photobook-print' && !inquiry.timeSlot) {
+    errors.timeSlot = 'Vui lòng chọn khung giờ chụp';
   }
 
   // Note/Concept message is optional so clients can easily ask for consultation or quote even with short notes like "hi"
@@ -247,6 +338,12 @@ export interface BookingLead extends BookingInquiry {
   notes?: string;
   source: 'web_form' | 'manual_entry' | 'quick_contact';
   estimatedPrice: number;
+  depositAmount: number;
+  paidAmount: number;
+  balance: number;
+  nextFollowUpAt?: string;
+  cancelReason?: string;
+  driveLink?: string;
   emailSentTo: string;
   emailSentAt: string;
 }
@@ -272,7 +369,12 @@ export function filterLeads(
   searchQuery: string = ''
 ): BookingLead[] {
   return leads.filter((lead) => {
-    if (statusFilter !== 'all' && lead.status !== statusFilter) {
+    if (statusFilter === 'due-today') {
+      const today = todayISO();
+      if (!(lead.nextFollowUpAt && lead.nextFollowUpAt <= today && (lead.status === 'new' || lead.status === 'consulting'))) {
+        return false;
+      }
+    } else if (statusFilter !== 'all' && lead.status !== statusFilter) {
       return false;
     }
 
@@ -314,6 +416,11 @@ export function calculateDashboardStats(leads: BookingLead[], photosCount: numbe
     ? Math.round(((depositedLeads + completedLeads) / totalLeads) * 100)
     : 0;
 
+  const activeLeads = leads.filter((l) => l.status !== 'cancelled');
+  const totalPaid = activeLeads.reduce((sum, l) => sum + (l.paidAmount || 0), 0);
+  const totalDeposited = activeLeads.reduce((sum, l) => sum + (l.depositAmount || 0), 0);
+  const totalBalance = activeLeads.reduce((sum, l) => sum + (l.balance ?? Math.max(0, (l.estimatedPrice || 0) - (l.paidAmount || 0))), 0);
+
   return {
     totalLeads,
     newLeads,
@@ -324,6 +431,9 @@ export function calculateDashboardStats(leads: BookingLead[], photosCount: numbe
     potentialRevenue,
     conversionRate,
     photosCount,
+    totalPaid,
+    totalDeposited,
+    totalBalance,
   };
 }
 
@@ -332,7 +442,7 @@ export function calculateDashboardStats(leads: BookingLead[], photosCount: numbe
  */
 export function generateEmailNotification(
   lead: BookingLead,
-  photographerEmail: string = 'anhyenk26@gmail.com'
+  photographerEmail: string = SITE_CONFIG.photographerEmail
 ): EmailNotificationLog {
   const pkg = getPackageDetails(lead.packageType);
   const now = new Date().toLocaleString('vi-VN', {
@@ -391,7 +501,9 @@ Hệ thống tự động đồng bộ từ website https://ais-dev-...
     sentAt: now,
     previewSnippet,
     fullBody,
-    status: 'delivered',
+    // Airform dung mode no-cors nen khong xac nhan duoc da gui that hay chua.
+    // De 'pending' cho dung thuc te, dung bao khach la 'da gui email'.
+    status: 'pending',
   };
 }
 
@@ -400,7 +512,7 @@ Hệ thống tự động đồng bộ từ website https://ais-dev-...
  */
 export function createBookingLead(
   inquiry: BookingInquiry,
-  photographerEmail: string = 'anhyenk26@gmail.com'
+  photographerEmail: string = SITE_CONFIG.photographerEmail
 ): { lead: BookingLead; emailLog: EmailNotificationLog } {
   const pkg = getPackageDetails(inquiry.packageType);
   const now = new Date().toLocaleString('vi-VN', {
@@ -413,14 +525,21 @@ export function createBookingLead(
 
   const leadId = `KY-${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 90)}`;
 
+  const estimatedPrice = calculateEstimatedPrice(inquiry.packageType, inquiry.groupCount);
+  const depositAmount = calculateDepositAmount(estimatedPrice);
   const lead: BookingLead = {
     ...inquiry,
+    phone: normalizePhone(inquiry.phone),
     id: leadId,
     createdAt: now,
     status: 'new',
     notes: 'Yêu cầu đăng ký từ form website, cần liên hệ tư vấn qua Zalo.',
     source: 'web_form',
-    estimatedPrice: pkg.basePriceVND,
+    estimatedPrice,
+    depositAmount,
+    paidAmount: 0,
+    balance: estimatedPrice,
+    driveLink: '',
     emailSentTo: photographerEmail,
     emailSentAt: now,
   };
@@ -487,6 +606,10 @@ export function exportLeadsToCsv(leads: BookingLead[]): string {
     'Giá Dự Kiến (VNĐ)',
     'Ngày Chụp Dự Kiến',
     'Địa Điểm',
+    'Khung Giờ',
+    'Tiền Cọc (VNĐ)',
+    'Còn Lại (VNĐ)',
+    'Link Drive',
     'Trạng Thái',
     'Ghi Chú Tư Vấn',
   ];
@@ -501,6 +624,10 @@ export function exportLeadsToCsv(leads: BookingLead[]): string {
     `"${l.estimatedPrice}"`,
     `"${l.preferredDate}"`,
     `"${l.location.replace(/"/g, '""')}"`,
+    `"${timeSlotLabel(l.timeSlot)}"`,
+    `"${l.depositAmount || 0}"`,
+    `"${l.balance ?? ''}"`,
+    `"${(l.driveLink || '').replace(/"/g, '""')}"`,
     `"${formatStatusLabel(l.status).label}"`,
     `"${(l.notes || '').replace(/"/g, '""')}"`,
   ]);
@@ -524,6 +651,13 @@ export function exportLeadsToExcel(leads: BookingLead[]): Uint8Array {
     'Ngày Chụp Dự Kiến': l.preferredDate,
     'Địa Điểm Mong Muốn': l.location,
     'Số Lượng Dự Kiến': l.groupSize || 'Chưa rõ',
+    'Khung Giờ': timeSlotLabel(l.timeSlot),
+    'Tiền Cọc (VNĐ)': l.depositAmount || 0,
+    'Đã Thu (VNĐ)': l.paidAmount || 0,
+    'Còn Lại (VNĐ)': l.balance ?? '',
+    'Link Drive': l.driveLink || '',
+    'Ngày Hẹn Gọi Lại': l.nextFollowUpAt || '',
+    'Lý Do Hủy': l.cancelReason || '',
     'Trạng Thái Tư Vấn': formatStatusLabel(l.status).label,
     'Concept & Lời Nhắn': l.message || '',
     'Ghi Chú Của Anh Yên': l.notes || '',
@@ -560,11 +694,11 @@ export function exportLeadsToExcel(leads: BookingLead[]): Uint8Array {
  */
 export async function sendBookingEmailReal(
   lead: BookingLead,
-  targetEmail: string = 'anhyenk26@gmail.com'
+  targetEmail: string = SITE_CONFIG.photographerEmail
 ): Promise<{ success: boolean; message: string; method: 'airform' | 'offline_logged' }> {
   const pkg = getPackageDetails(lead.packageType);
 
-  const cleanEmail = (targetEmail || 'anhyenk26@gmail.com').trim().toLowerCase();
+  const cleanEmail = (targetEmail || SITE_CONFIG.photographerEmail).trim().toLowerCase();
 
   try {
     const payload = {
@@ -595,16 +729,18 @@ export async function sendBookingEmailReal(
       // Background fallback handled silently
     });
 
+    // Airform no-cors: trinh duyet khong doc duoc ket qua tra ve, nen KHONG
+    // duoc bao la 'da gui email'. Don da luu, Yen kiem tra Dashboard / Zalo.
     return {
-      success: true,
-      message: `Đã tự động gửi thông báo lịch hẹn tới Gmail: ${cleanEmail}`,
+      success: false,
+      message: 'Đơn đã lưu, Anh Yên sẽ liên hệ qua Zalo/SĐT trong ngày. (Email thông báo qua Airform chưa xác nhận được đã gửi.)',
       method: 'airform',
     };
   } catch (error: any) {
     console.warn('Real email dispatch network warning:', error);
     return {
-      success: true,
-      message: `Đã tự động ghi nhận và gửi thông báo tới: ${cleanEmail}`,
+      success: false,
+      message: 'Đơn đã lưu, Anh Yên sẽ liên hệ qua Zalo/SĐT trong ngày.',
       method: 'offline_logged',
     };
   }
@@ -615,7 +751,7 @@ export async function sendBookingEmailReal(
  */
 export function generateDirectMailtoUrl(
   lead: BookingLead,
-  targetEmail: string = 'anhyenk26@gmail.com'
+  targetEmail: string = SITE_CONFIG.photographerEmail
 ): string {
   const pkg = getPackageDetails(lead.packageType);
   const subject = encodeURIComponent(`[YÊN VISUALS] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);
@@ -642,7 +778,7 @@ export function generateDirectMailtoUrl(
  */
 export function generateWebGmailUrl(
   lead: BookingLead,
-  targetEmail: string = 'anhyenk26@gmail.com'
+  targetEmail: string = SITE_CONFIG.photographerEmail
 ): string {
   const pkg = getPackageDetails(lead.packageType);
   const subject = encodeURIComponent(`[YÊN VISUALS] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);

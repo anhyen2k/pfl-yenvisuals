@@ -39,17 +39,21 @@ import {
   PhotoItem,
   filterLeads,
   calculateDashboardStats,
+  calculateDepositAmount,
   formatStatusLabel,
   formatVND,
+  timeSlotLabel,
   exportLeadsToCsv,
   exportLeadsToExcel,
   getPackageDetails,
   sendBookingEmailReal,
 } from '../utils/portfolioLogic';
+import { SITE_CONFIG } from '../config/site';
 
 interface DashboardViewProps {
   leads: BookingLead[];
   onUpdateLeadStatus: (leadId: string, status: BookingStatus) => void;
+  onUpdateLead?: (leadId: string, updates: Partial<BookingLead>) => void;
   onUpdateLeadNotes: (leadId: string, notes: string) => void;
   onDeleteLead: (leadId: string) => void;
   onAddManualLead: (lead: Omit<BookingLead, 'id' | 'createdAt' | 'emailSentAt' | 'emailSentTo'>) => void;
@@ -70,6 +74,7 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   leads,
   onUpdateLeadStatus,
+  onUpdateLead,
   onUpdateLeadNotes,
   onDeleteLead,
   onAddManualLead,
@@ -110,15 +115,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     message: '',
     notes: 'Liên hệ qua Zalo / Facebook',
     estimatedPrice: 650000,
+    paidAmount: 0,
     status: 'new' as BookingStatus,
     source: 'manual_entry' as const,
   });
+
+  // Per-lead drafts: link Drive, trang thai cho luu, ngay hen goi lai, ly do huy
+  const [driveLinkDrafts, setDriveLinkDrafts] = useState<Record<string, string>>({});
+  const [pendingStatus, setPendingStatus] = useState<Record<string, BookingStatus>>({});
+  const [followUpDates, setFollowUpDates] = useState<Record<string, string>>({});
+  const [cancelReasons, setCancelReasons] = useState<Record<string, string>>({});
+  const [statusErrors, setStatusErrors] = useState<Record<string, string>>({});
 
   // Copy toast state
   const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
 
   const stats = calculateDashboardStats(leads, photos.length);
   const filteredLeads = filterLeads(leads, statusFilter, searchQuery);
+  const dueTodayCount = filterLeads(leads, 'due-today', '').length;
 
   const triggerCopyToast = (msg: string) => {
     setCopiedNotification(msg);
@@ -184,6 +198,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  // Luu link Drive cua 1 lead (uu tien onUpdateLead, neu khong co thi bao loi nhe)
+  const handleSaveDriveLink = (lead: BookingLead) => {
+    const link = (driveLinkDrafts[lead.id] ?? lead.driveLink ?? '').trim();
+    if (onUpdateLead) {
+      onUpdateLead(lead.id, { driveLink: link });
+      triggerCopyToast('Đã lưu link Drive!');
+    } else {
+      triggerCopyToast('Không lưu được link Drive (chưa có onUpdateLead).');
+    }
+  };
+
+  // Luu trang thai + ngay hen goi lai (+ ly do huy neu chon cancelled).
+  // Trang thai chi duoc doi khi bam Luu; huy ma khong co ly do thi bao loi, khong doi.
+  const handleSaveLeadStatus = (lead: BookingLead) => {
+    const nextStatus = pendingStatus[lead.id];
+    if (!nextStatus) return;
+    const nextFollowUpAt = followUpDates[lead.id] ?? lead.nextFollowUpAt ?? '';
+    if (nextStatus === 'cancelled') {
+      const reason = (cancelReasons[lead.id] ?? lead.cancelReason ?? '').trim();
+      if (!reason) {
+        setStatusErrors((prev) => ({
+          ...prev,
+          [lead.id]: 'Vui lòng nhập lý do hủy trước khi đổi trạng thái.',
+        }));
+        return;
+      }
+      if (onUpdateLead) {
+        onUpdateLead(lead.id, {
+          status: nextStatus,
+          nextFollowUpAt: nextFollowUpAt || undefined,
+          cancelReason: reason,
+        });
+      } else {
+        onUpdateLeadStatus(lead.id, nextStatus);
+      }
+    } else if (onUpdateLead) {
+      onUpdateLead(lead.id, {
+        status: nextStatus,
+        nextFollowUpAt: nextFollowUpAt || undefined,
+      });
+    } else {
+      onUpdateLeadStatus(lead.id, nextStatus);
+    }
+    setStatusErrors((prev) => ({ ...prev, [lead.id]: '' }));
+    setPendingStatus((prev) => {
+      const next = { ...prev };
+      delete next[lead.id];
+      return next;
+    });
+    triggerCopyToast('Đã cập nhật trạng thái khách hàng!');
+  };
+
   const handleCreateManualLeadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeadForm.clientName || !newLeadForm.phone) {
@@ -191,9 +257,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return;
     }
     const pkg = getPackageDetails(newLeadForm.packageType);
+    const paidAmount = Math.max(0, newLeadForm.paidAmount || 0);
     onAddManualLead({
       ...newLeadForm,
       estimatedPrice: pkg.basePriceVND,
+      depositAmount: calculateDepositAmount(pkg.basePriceVND),
+      paidAmount,
+      balance: Math.max(0, pkg.basePriceVND - paidAmount),
     });
     setIsAddLeadModalOpen(false);
     setNewLeadForm({
@@ -207,6 +277,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       message: '',
       notes: '',
       estimatedPrice: 650000,
+      paidAmount: 0,
       status: 'new',
       source: 'manual_entry',
     });
@@ -258,10 +329,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     type="button"
                     onClick={onGoogleLogin}
                     className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
-                    title="Bấm để đăng nhập tài khoản Google anhyenk26@gmail.com và kích hoạt đồng bộ đám mây thời gian thực"
+                    title={`Bấm để đăng nhập tài khoản Google ${SITE_CONFIG.photographerEmail} và kích hoạt đồng bộ đám mây thời gian thực`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    <span>Đồng bộ Google Cloud (anhyenk26@gmail.com)</span>
+                    <span>Đồng bộ Google Cloud ({SITE_CONFIG.photographerEmail})</span>
                   </button>
                 )}
               </div>
@@ -363,6 +434,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[11px] text-neutral-500">
               Tiềm năng: <span className="font-mono">{formatVND(stats.potentialRevenue)}</span>
             </div>
+          </div>
+        </div>
+
+        {/* Payment Summary Row: da thu / tien coc / con phai thu */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+              <span>ĐÃ THU</span>
+              <DollarSign className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-xl sm:text-2xl font-serif font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+              {formatVND(stats.totalPaid)}
+            </div>
+            <div className="text-[11px] text-neutral-500">Tổng tiền khách đã trả (chưa tính đơn đã hủy)</div>
+          </div>
+
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+              <span>TIỀN CỌC</span>
+              <DollarSign className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl sm:text-2xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
+              {formatVND(stats.totalDeposited)}
+            </div>
+            <div className="text-[11px] text-neutral-500">Tổng tiền cọc theo gói (30% giá gói)</div>
+          </div>
+
+          <div className="p-5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-amber-700 dark:text-amber-400 font-medium">
+              <span>CÒN PHẢI THU</span>
+              <AlertCircle className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl sm:text-2xl font-serif font-bold text-amber-900 dark:text-amber-300 tabular-nums">
+              {formatVND(stats.totalBalance)}
+            </div>
+            <div className="text-[11px] text-amber-700 dark:text-amber-400">Tổng số tiền khách còn nợ</div>
           </div>
         </div>
 
@@ -484,6 +591,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   { id: 'all', label: 'Tất Cả' },
                   { id: 'new', label: 'Mới Nhận' },
                   { id: 'consulting', label: 'Đang Tư Vấn' },
+                  { id: 'due-today', label: 'Cần gọi hôm nay' },
                   { id: 'deposited', label: 'Đã Cọc' },
                   { id: 'completed', label: 'Đã Chụp' },
                   { id: 'cancelled', label: 'Đã Hủy' },
@@ -499,6 +607,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     }`}
                   >
                     {s.label}
+                    {s.id === 'due-today' && dueTodayCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                        {dueTodayCount}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -513,15 +626,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <th className="py-3 px-4 font-semibold">Khách Hàng & Liên Hệ</th>
                       <th className="py-3 px-4 font-semibold">Gói Chụp & Giá</th>
                       <th className="py-3 px-4 font-semibold">Ngày & Địa Điểm</th>
+                      <th className="py-3 px-4 font-semibold">Khung Giờ</th>
+                      <th className="py-3 px-4 font-semibold">Tiền Cọc</th>
+                      <th className="py-3 px-4 font-semibold">Còn Lại</th>
                       <th className="py-3 px-4 font-semibold">Trạng Thái</th>
                       <th className="py-3 px-4 font-semibold">Ghi Chú Tư Vấn</th>
+                      <th className="py-3 px-4 font-semibold">Link Drive</th>
                       <th className="py-3 px-4 font-semibold text-right">Hành Động Trực Tiếp</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
                     {filteredLeads.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-neutral-400">
+                        <td colSpan={10} className="py-12 text-center text-neutral-400">
                           <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
                           <p>Không tìm thấy yêu cầu tư vấn nào phù hợp.</p>
                         </td>
@@ -590,13 +707,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </div>
                             </td>
 
+                            {/* Time slot column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="font-medium text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
+                                {timeSlotLabel(lead.timeSlot) || 'Chưa chọn'}
+                              </div>
+                              {lead.nextFollowUpAt && (
+                                <div className="text-amber-600 dark:text-amber-400 text-[11px] mt-1 font-mono whitespace-nowrap">
+                                  Hẹn gọi: {lead.nextFollowUpAt}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Deposit column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
+                                {formatVND(lead.depositAmount || 0)}
+                              </div>
+                              <div className="text-neutral-400 text-[11px] mt-0.5 whitespace-nowrap">
+                                Đã thu: {formatVND(lead.paidAmount || 0)}
+                              </div>
+                            </td>
+
+                            {/* Remaining balance column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="font-mono font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                                {formatVND(
+                                  lead.balance ??
+                                    Math.max(0, (lead.estimatedPrice || 0) - (lead.paidAmount || 0))
+                                )}
+                              </div>
+                            </td>
+
                             {/* Status dropdown column */}
                             <td className="py-4 px-4 align-top">
                               <select
-                                value={lead.status}
-                                onChange={(e) =>
-                                  onUpdateLeadStatus(lead.id, e.target.value as BookingStatus)
-                                }
+                                value={pendingStatus[lead.id] ?? lead.status}
+                                onChange={(e) => {
+                                  const next = e.target.value as BookingStatus;
+                                  setPendingStatus((prev) => ({ ...prev, [lead.id]: next }));
+                                  if (next !== 'cancelled') {
+                                    setStatusErrors((prev) => ({ ...prev, [lead.id]: '' }));
+                                  }
+                                }}
                                 className={`px-2 py-1 rounded text-xs font-medium border cursor-pointer ${statusBadge.bg} ${statusBadge.color} ${statusBadge.border}`}
                               >
                                 <option value="new">Mới Nhận (Cần gọi)</option>
@@ -605,6 +758,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <option value="completed">Đã Chụp & Trả Ảnh</option>
                                 <option value="cancelled">Đã Hủy Lịch</option>
                               </select>
+                              {lead.status === 'cancelled' && lead.cancelReason && (
+                                <div className="text-[10px] text-neutral-400 mt-1">
+                                  Lý do hủy: {lead.cancelReason}
+                                </div>
+                              )}
+                              {pendingStatus[lead.id] && (
+                                <div className="mt-2 space-y-1.5">
+                                  <label className="block text-[10px] text-neutral-500">
+                                    Ngày hẹn gọi lại
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={followUpDates[lead.id] ?? lead.nextFollowUpAt ?? ''}
+                                    onChange={(e) =>
+                                      setFollowUpDates((prev) => ({
+                                        ...prev,
+                                        [lead.id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded bg-white dark:bg-neutral-900 dark:text-white"
+                                  />
+                                  {pendingStatus[lead.id] === 'cancelled' && (
+                                    <input
+                                      type="text"
+                                      placeholder="Lý do hủy (bắt buộc)"
+                                      value={cancelReasons[lead.id] ?? lead.cancelReason ?? ''}
+                                      onChange={(e) =>
+                                        setCancelReasons((prev) => ({
+                                          ...prev,
+                                          [lead.id]: e.target.value,
+                                        }))
+                                      }
+                                      className="w-full px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded bg-white dark:bg-neutral-900 dark:text-white"
+                                    />
+                                  )}
+                                  {statusErrors[lead.id] && (
+                                    <div className="text-[10px] text-rose-600 dark:text-rose-400">
+                                      {statusErrors[lead.id]}
+                                    </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveLeadStatus(lead)}
+                                    className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer"
+                                  >
+                                    Lưu
+                                  </button>
+                                </div>
+                              )}
                               <div className="text-[10px] text-neutral-400 mt-1 font-mono">
                                 Email gửi: {lead.emailSentTo}
                               </div>
@@ -623,6 +825,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <div className="text-neutral-500 text-[11px] mt-1 line-clamp-1">
                                   Lời nhắn: {lead.message}
                                 </div>
+                              )}
+                            </td>
+
+                            {/* Drive link column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  placeholder="Dán link Google Drive..."
+                                  value={driveLinkDrafts[lead.id] ?? lead.driveLink ?? ''}
+                                  onChange={(e) =>
+                                    setDriveLinkDrafts((prev) => ({
+                                      ...prev,
+                                      [lead.id]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-40 px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded bg-white dark:bg-neutral-900 dark:text-white"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDriveLink(lead)}
+                                  className="px-2 py-1 text-xs font-medium rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer shrink-0"
+                                  title="Lưu link Drive cho khách này"
+                                >
+                                  Lưu
+                                </button>
+                              </div>
+                              {lead.driveLink && (
+                                <a
+                                  href={lead.driveLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 mt-1 text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Mở Drive</span>
+                                </a>
                               )}
                             </td>
 
@@ -936,7 +1175,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </label>
                     <input
                       type="text"
-                      defaultValue="0912 888 266"
+                      defaultValue={SITE_CONFIG.phoneDisplay}
                       readOnly
                       className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
                     />
@@ -1260,6 +1499,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 dark:text-neutral-300 mb-1 font-medium">
+                  Tiền cọc đã thu (VNĐ)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1000}
+                  placeholder="0"
+                  value={newLeadForm.paidAmount}
+                  onChange={(e) =>
+                    setNewLeadForm({
+                      ...newLeadForm,
+                      paidAmount: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                />
               </div>
 
               <div>

@@ -18,8 +18,12 @@ import {
   Sparkles,
   Pencil,
   Trash2,
+  MessageCircle,
+  Copy,
+  Check,
 } from 'lucide-react';
-import { PhotoItem, PhotoCategory, formatExifString } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, formatExifString, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { SITE_CONFIG } from '../config/site';
 
 interface GalleryProps {
   photos: PhotoItem[];
@@ -55,15 +59,62 @@ export const Gallery: React.FC<GalleryProps> = ({
   onDeletePhoto,
 }) => {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('bento');
+  const [copiedFavorites, setCopiedFavorites] = useState(false);
 
+  // Nhan tab danh muc lay tu bang dung chung, chi 'all' la ngoai le (khong co trong CATEGORY_LABELS).
   const categories: { key: PhotoCategory; label: string }[] = [
     { key: 'all', label: 'Tất Cả Album' },
-    { key: 'aodai-trang', label: 'Áo Dài Trắng' },
-    { key: 'kiyieu-nhom', label: 'Kỉ Yếu Nhóm Lớp' },
-    { key: 'cophuc', label: 'Cổ Phục Di Sản' },
-    { key: 'aodai-pho', label: 'Áo Dài Dạo Phố' },
-    { key: 'nang-tho', label: 'Nàng Thơ Cận Cảnh' },
+    { key: 'aodai-trang', label: CATEGORY_LABELS['aodai-trang'] },
+    { key: 'kiyieu-nhom', label: CATEGORY_LABELS['kiyieu-nhom'] },
+    { key: 'cophuc', label: CATEGORY_LABELS['cophuc'] },
+    { key: 'aodai-pho', label: CATEGORY_LABELS['aodai-pho'] },
+    { key: 'nang-tho', label: CATEGORY_LABELS['nang-tho'] },
   ];
+
+  // Anh yeu thich hien co trong danh sach anh dang hien thi (theo favoriteIds).
+  const favoritePhotos = photos.filter((photo) => favoriteIds.includes(photo.id));
+
+  const buildFavoritesMessage = (): string => {
+    const lines = favoritePhotos.map((photo) => `- ${photo.vietnameseTitle} (ID: ${photo.id})`);
+    return [
+      `Chào ${SITE_CONFIG.photographerName}, em gửi danh sách ảnh yêu thích từ Yên Visuals:`,
+      ...lines,
+      '',
+      'Nhờ Anh tư vấn giúp em nhé!',
+    ].join('\n');
+  };
+
+  const handleShareFavoritesViaZalo = () => {
+    if (favoritePhotos.length === 0) return;
+    const url = `${SITE_CONFIG.zaloUrl}?text=${encodeURIComponent(buildFavoritesMessage())}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const copyFavoritesToClipboard = async () => {
+    if (favoritePhotos.length === 0) return;
+    const text = buildFavoritesMessage();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedFavorites(true);
+    } catch {
+      // Fallback cho trinh duyet khong ho tro Clipboard API.
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        setCopiedFavorites(true);
+      } catch {
+        // Khong copy duoc: giu nguyen trang thai, khong bao loi gia.
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+    window.setTimeout(() => setCopiedFavorites(false), 2000);
+  };
 
   return (
     <section id="gallery" className="py-16 md:py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -190,6 +241,33 @@ export const Gallery: React.FC<GalleryProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Chia se danh sach yeu thich — chi hien khi co anh yeu thich */}
+      {favoriteIds.length > 0 && (
+        <div className="pb-6 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+            Danh sách yêu thích ({favoriteIds.length} ảnh):
+          </span>
+          <button
+            type="button"
+            onClick={handleShareFavoritesViaZalo}
+            className="px-2.5 py-1.5 text-xs font-medium text-white bg-[#0068ff] rounded-md flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer"
+            title="Gửi danh sách ảnh yêu thích qua Zalo cho Anh Yên"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            <span>Gửi qua Zalo</span>
+          </button>
+          <button
+            type="button"
+            onClick={copyFavoritesToClipboard}
+            className="px-2.5 py-1.5 text-xs font-medium text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md flex items-center gap-1.5 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+            title="Sao chép danh sách ảnh yêu thích vào clipboard"
+          >
+            {copiedFavorites ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedFavorites ? 'Đã copy danh sách' : 'Copy danh sách'}</span>
+          </button>
+        </div>
+      )}
 
       {/* Empty State */}
       {photos.length === 0 && (

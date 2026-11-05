@@ -20,7 +20,8 @@ import { ClientProofingModal } from './components/ClientProofingModal';
 import { DashboardView } from './components/DashboardView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Lock } from 'lucide-react';
-import { INITIAL_PHOTOS } from './data/portfolioData';
+import { INITIAL_PHOTOS, PHOTO_SERIES } from './data/portfolioData';
+import { SITE_CONFIG } from './config/site';
 import {
   PhotoItem,
   PhotoCategory,
@@ -30,6 +31,8 @@ import {
   BookingStatus,
   EmailNotificationLog,
   INITIAL_LEADS,
+  calculateDepositAmount,
+  calculateEstimatedPrice,
   createBookingLead,
   generateEmailNotification,
   sendBookingEmailReal,
@@ -66,7 +69,7 @@ export default function App() {
 
   // Photographer email recipient for customer registration notifications
   const [photographerEmail, setPhotographerEmail] = useState<string>(() => {
-    return localStorage.getItem('yen_photographer_email') || 'anhyenk26@gmail.com';
+    return localStorage.getItem('yen_photographer_email') || SITE_CONFIG.photographerEmail;
   });
 
   // Leads & Contact Inquiries state
@@ -89,7 +92,7 @@ export default function App() {
       console.warn('Failed to parse email logs', e);
     }
     // Generate initial logs from initial leads
-    return INITIAL_LEADS.map((l) => generateEmailNotification(l, 'anhyenk26@gmail.com'));
+    return INITIAL_LEADS.map((l) => generateEmailNotification(l, SITE_CONFIG.photographerEmail));
   });
 
   // Photos state with local storage persistence and Cloud Firestore sync
@@ -117,9 +120,9 @@ export default function App() {
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('portfolio_favorites');
-      return saved ? JSON.parse(saved) : ['photo-1', 'photo-4'];
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return ['photo-1', 'photo-4'];
+      return [];
     }
   });
 
@@ -130,6 +133,11 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>('guest');
 
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
+  const [photosLoading, setPhotosLoading] = useState(true);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [bookingPackage, setBookingPackage] = useState<BookingInquiry['packageType'] | undefined>(undefined);
 
   // Modal states
   const [selectedPhotoForLightbox, setSelectedPhotoForLightbox] = useState<PhotoItem | null>(null);
@@ -140,18 +148,29 @@ export default function App() {
   const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
 
-  // Real-time synchronization of portfolio photos from Cloud Firestore
+  // Real-time synchronization of portfolio photos from Cloud Firestore.
+  // Firestore la nguon chinh, localStorage chi la cache khi offline / loi.
   useEffect(() => {
     let isMounted = true;
-    const unsub = subscribeToPortfolioPhotos((cloudPhotos) => {
-      if (!isMounted) return;
-      if (cloudPhotos && cloudPhotos.length > 0) {
-        setPhotos(cloudPhotos);
-        try {
-          localStorage.setItem('portfolio_all_photos', JSON.stringify(cloudPhotos));
-        } catch {}
+    const unsub = subscribeToPortfolioPhotos(
+      (cloudPhotos) => {
+        if (!isMounted) return;
+        setPhotosLoading(false);
+        setPhotosError(null);
+        if (cloudPhotos && cloudPhotos.length > 0) {
+          setPhotos(cloudPhotos);
+          try {
+            localStorage.setItem('portfolio_all_photos', JSON.stringify(cloudPhotos));
+          } catch {}
+        }
+      },
+      (err) => {
+        if (!isMounted) return;
+        setPhotosLoading(false);
+        setPhotosError('Không tải được ảnh từ đám mây, đang dùng bản lưu trên máy.');
+        console.warn('Portfolio photos subscription warning:', err);
       }
-    });
+    );
     return () => {
       isMounted = false;
       unsub();
@@ -281,12 +300,18 @@ export default function App() {
   }, [favoriteIds]);
 
   // Filtered photos computation using decoupled pure logic
+  const seriesTitleById: Record<string, string> = {};
+  PHOTO_SERIES.forEach((sr) => { seriesTitleById[sr.id] = `${sr.title} ${sr.vietnameseTitle}`; });
+  const seriesFilteredPhotos = selectedSeriesId
+    ? photos.filter((ph) => ph.seriesId === selectedSeriesId)
+    : photos;
   const displayedPhotos = filterPhotos(
-    photos,
+    seriesFilteredPhotos,
     selectedCategory,
     searchQuery,
     showingFavoritesOnly,
-    favoriteIds
+    favoriteIds,
+    seriesTitleById
   );
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
@@ -294,6 +319,11 @@ export default function App() {
     setFavoriteIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
+  };
+
+  const reportSyncError = (msg: string) => {
+    setSyncError(msg);
+    window.alert(msg);
   };
 
   const handleEditPhoto = (photo: PhotoItem) => {
@@ -312,6 +342,7 @@ export default function App() {
     }
 
     savePhotoToCloud(updatedPhoto).catch((err) => {
+      reportSyncError('Lưu ảnh lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.');
       console.warn('Cloud Firestore photo update error:', err);
     });
   };
@@ -335,6 +366,7 @@ export default function App() {
     }
 
     deletePhotoFromCloud(photoId).catch((err) => {
+      reportSyncError('Xoá ảnh trên đám mây thất bại, ảnh có thể vẫn còn trên máy khác. Vui lòng thử lại.');
       console.warn('Cloud Firestore photo delete error:', err);
     });
   };
@@ -346,6 +378,7 @@ export default function App() {
       return updated;
     });
     savePhotoToCloud(newPhoto).catch((err) => {
+      reportSyncError('Lưu ảnh mới lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.');
       console.warn('Cloud Firestore photo save error:', err);
     });
     setSelectedCategory('all');
@@ -353,6 +386,7 @@ export default function App() {
   };
 
   const handleToggleFeaturedPhoto = (photoId: string) => {
+    const previouslyFeatured = photos.filter((p) => p.featured && p.id !== photoId);
     setPhotos((prev) => {
       const updated = prev.map((p) => ({
         ...p,
@@ -361,9 +395,14 @@ export default function App() {
       localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
       return updated;
     });
-    updatePhotoInCloud(photoId, { featured: true }).catch((err) => {
-      console.warn('Cloud Firestore photo feature error:', err);
-    });
+    // Bo ghim anh cu tren Firestore truoc, roi moi ghim anh moi — neu khong
+    // tai lai se co nhieu anh cung featured.
+    Promise.all(previouslyFeatured.map((p) => updatePhotoInCloud(p.id, { featured: false })))
+      .then(() => updatePhotoInCloud(photoId, { featured: true }))
+      .catch((err) => {
+        reportSyncError('Đổi ảnh nổi bật trên đám mây thất bại, vui lòng thử lại.');
+        console.warn('Cloud Firestore photo feature error:', err);
+      });
   };
 
   const handleDeletePhoto = (photoId: string) => {
@@ -371,15 +410,17 @@ export default function App() {
   };
 
   const handleSelectSeries = (seriesId: string) => {
-    // Filter gallery by matching series
-    const seriesPhoto = photos.find((p) => p.seriesId === seriesId);
-    if (seriesPhoto) {
-      setSelectedCategory(seriesPhoto.category);
-    }
+    setSelectedSeriesId(seriesId);
+    setSelectedCategory('all');
+    setShowingFavoritesOnly(false);
     const element = document.getElementById('gallery');
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+  const handleOpenBookingForPackage = (pkg: BookingInquiry['packageType']) => {
+    setBookingPackage(pkg);
+    setIsBookingOpen(true);
   };
 
   // Lead and Consultation Handlers
@@ -414,6 +455,25 @@ export default function App() {
         console.warn('Background email send error', e)
       );
     }
+  };
+
+  const handleUpdateLead = (leadId: string, updates: Partial<BookingLead>) => {
+    const target = leads.find((l) => l.id === leadId);
+    if (!target) return;
+    const updatedLead: BookingLead = { ...target, ...updates };
+    // Neu doi tien coc da thu thi tinh lai con lai.
+    if (updates.paidAmount !== undefined) {
+      updatedLead.balance = Math.max(0, updatedLead.estimatedPrice - updatedLead.paidAmount);
+    }
+    setLeads((prev) => {
+      const updated = prev.map((l) => (l.id === leadId ? updatedLead : l));
+      localStorage.setItem('yen_portfolio_leads', JSON.stringify(updated));
+      return updated;
+    });
+    saveBookingLeadToCloud(updatedLead).catch((e) => {
+      reportSyncError('Lưu thay đổi đơn lên đám mây thất bại, vui lòng thử lại.');
+      console.warn('Firestore updateLead error', e);
+    });
   };
 
   const handleUpdateLeadStatus = (leadId: string, status: BookingStatus) => {
@@ -462,10 +522,18 @@ export default function App() {
       month: '2-digit',
       year: 'numeric',
     });
+    const estimatedPrice = newLeadData.estimatedPrice || calculateEstimatedPrice(newLeadData.packageType, newLeadData.groupCount);
+    const depositAmount = newLeadData.depositAmount ?? calculateDepositAmount(estimatedPrice);
+    const paidAmount = newLeadData.paidAmount ?? 0;
     const lead: BookingLead = {
       ...newLeadData,
       id: `KY-${Date.now().toString().slice(-6)}`,
       createdAt: now,
+      estimatedPrice,
+      depositAmount,
+      paidAmount,
+      balance: Math.max(0, estimatedPrice - paidAmount),
+      driveLink: newLeadData.driveLink || '',
       emailSentTo: photographerEmail,
       emailSentAt: now,
     };
@@ -490,47 +558,36 @@ export default function App() {
     );
   };
 
+  // Gui mail thu: KHONG tao lead gia, KHONG them vao danh sach emailLogs chinh
+  // (truoc day nut nay tao 1 khach 'TEST-...' lam ban du lieu va sai thong ke).
+  // Chi gui thu roi bao ket qua; log test co [TEST] chi ghi trong console.
   const handleSendTestEmail = () => {
+    const now = new Date().toLocaleString('vi-VN');
     const testLead: BookingLead = {
       id: `TEST-${Date.now().toString().slice(-4)}`,
-      clientName: 'Khách Đăng Ký Mẫu (Test Email)',
-      phone: '0912 888 266',
+      clientName: '[TEST] Kiểm tra email',
+      phone: SITE_CONFIG.phone,
       email: 'khachhang.test@gmail.com',
       packageType: 'aodai-solo',
-      preferredDate: 'Thứ Bảy tuần này',
-      location: 'Đường Phan Đình Phùng, Ba Đình, Hà Nội',
+      preferredDate: now,
+      location: 'Hà Nội',
       groupSize: '1 bạn',
-      message: 'Đây là email thử nghiệm gửi về hộp thư Anh Yên để kiểm tra hệ thống thông báo form tự động!',
-      createdAt: new Date().toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }),
+      message: '[TEST] Email thử nghiệm — không phải đơn thật, không tính vào thống kê.',
+      createdAt: now,
       status: 'new',
-      notes: 'Email kiểm tra hệ thống hoạt động tốt.',
+      notes: '[TEST] Email kiểm tra hệ thống.',
       source: 'web_form',
       estimatedPrice: 650000,
+      depositAmount: 195000,
+      paidAmount: 0,
+      balance: 650000,
+      driveLink: '',
       emailSentTo: photographerEmail,
-      emailSentAt: new Date().toLocaleString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }),
+      emailSentAt: now,
     };
-    const testEmail = generateEmailNotification(testLead, photographerEmail);
-    setEmailLogs((prev) => {
-      const updated = [testEmail, ...prev];
-      localStorage.setItem('yen_email_logs', JSON.stringify(updated));
-      return updated;
-    });
-
-    // Real HTTP dispatch to FormSubmit for Anhyenk26@gmail.com activation
     sendBookingEmailReal(testLead, photographerEmail).then((res) => {
-      console.log('Test email dispatch result:', res);
+      console.log('[TEST] Test email dispatch result:', res);
+      window.alert(res.message || 'Đã gửi mail thử (chưa xác nhận được đã gửi qua Airform — hãy kiểm tra hộp thư).');
     });
   };
 
@@ -562,12 +619,31 @@ export default function App() {
         onLogoutAdmin={handleLogoutAdmin}
       />
 
+      {syncError && (
+        <div className="bg-rose-100 dark:bg-rose-950/60 border-b border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-300 text-xs px-4 py-2 text-center">
+          {syncError}{' '}
+          <button type="button" onClick={() => setSyncError(null)} className="underline font-semibold">Đã hiểu</button>
+        </div>
+      )}
+      {photosLoading && currentView === 'portfolio' && (
+        <div className="bg-neutral-100 dark:bg-neutral-900 text-neutral-500 text-xs px-4 py-2 text-center">Đang tải ảnh...</div>
+      )}
+      {photosError && currentView === 'portfolio' && (
+        <div className="bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs px-4 py-2 text-center">{photosError}</div>
+      )}
+      {selectedSeriesId && currentView === 'portfolio' && (
+        <div className="bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300 text-xs px-4 py-2 text-center">
+          Đang xem series: {seriesTitleById[selectedSeriesId] || selectedSeriesId}{' '}
+          <button type="button" onClick={() => setSelectedSeriesId(null)} className="underline font-semibold">Xem tất cả ảnh</button>
+        </div>
+      )}
       {currentView === 'dashboard' ? (
         /* Management Dashboard View (Dasboah) - Strictly protected for Admin */
         userRole === 'admin' ? (
           <DashboardView
             leads={leads}
             onUpdateLeadStatus={handleUpdateLeadStatus}
+            onUpdateLead={handleUpdateLead}
             onUpdateLeadNotes={handleUpdateLeadNotes}
             onDeleteLead={handleDeleteLead}
             onAddManualLead={handleAddManualLead}
@@ -641,6 +717,7 @@ export default function App() {
               selectedCategory={selectedCategory}
               onSelectCategory={(cat) => {
                 setSelectedCategory(cat);
+                setSelectedSeriesId(null);
                 setShowingFavoritesOnly(false);
               }}
               searchQuery={searchQuery}
@@ -656,13 +733,13 @@ export default function App() {
             />
 
             {/* Curated Monographs & Exhibitions Series */}
-            <SeriesSection onSelectSeries={handleSelectSeries} />
+            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} />
 
             {/* About the Artist & In My Camera Bag Gear */}
             <AboutSection />
 
             {/* Consultation & Studio Contact */}
-            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} />
+            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} leads={leads} />
           </main>
 
           {/* Minimalist Footer with discreet Admin Entry */}
@@ -704,6 +781,7 @@ export default function App() {
       <DeletePhotoModal
         isOpen={Boolean(deletingPhoto)}
         photo={deletingPhoto}
+        seriesTitle={deletingPhoto?.seriesId ? seriesTitleById[deletingPhoto.seriesId] : undefined}
         onClose={() => setDeletingPhoto(null)}
         onConfirm={handleConfirmDeletePhoto}
       />
@@ -711,9 +789,11 @@ export default function App() {
       {/* Booking & Consultation Modal (For Clients) */}
       <BookingModal
         isOpen={isBookingOpen}
-        onClose={() => setIsBookingOpen(false)}
+        onClose={() => { setIsBookingOpen(false); setBookingPackage(undefined); }}
         onBookingSubmitted={handleBookingSubmit}
         photographerEmail={photographerEmail}
+        existingLeads={leads}
+        initialPackage={bookingPackage}
       />
 
       {/* Add Custom Photography Modal (Admin only) */}
@@ -728,6 +808,7 @@ export default function App() {
         isOpen={isProofingOpen}
         onClose={() => setIsProofingOpen(false)}
         samplePhotos={photos}
+        leads={leads}
       />
 
       {/* Admin Login Modal */}

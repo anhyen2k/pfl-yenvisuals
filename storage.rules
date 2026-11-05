@@ -1,0 +1,23 @@
+rules_version = '2';
+// Firebase Storage cho Yen Visuals.
+// - Khach xem duoc anh portfolio (public read).
+// - Chi admin (Google anhyenk26@gmail.com) moi duoc upload / xoa anh.
+// Deploy rieng file nay len Firebase (khong tu len theo code web):
+//   firebase deploy --only storage
+// hoac trong Firebase Console > Storage > Rules: dan noi dung file nay vao roi Publish.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email.lower() == "anhyenk26@gmail.com";
+    }
+    match /portfolio_photos/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

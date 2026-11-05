@@ -20,6 +20,12 @@ import {
   orderBy,
   getDocFromServer,
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
   BookingLead,
@@ -33,6 +39,40 @@ export const app = initializeApp(firebaseConfig);
 
 // Initialize Cloud Firestore with dedicated Database ID (CRITICAL)
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Firebase Storage — anh dung de luu file anh that (Firestore chi luu link).
+// Bucket lay tu firebase-applet-config.json (storageBucket da co san).
+export const storage = getStorage(app);
+
+/**
+ * Nen anh xuong toi da 1600px (giu ti le) roi upload len Storage, tra ve downloadURL.
+ * KHONG luu base64 vao Firestore nua — Firestore gioi han truong image 50.000 ky tu.
+ * Neu Storage chua deploy rules / upload loi thi throw, de giao dien bao loi ro
+ * cho admin thay vi luu lang local roi tuong da len cloud.
+ */
+export async function uploadPhotoToStorage(file: File, photoId: string): Promise<string> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  let blob: Blob = file;
+  if (bitmap) {
+    const maxDim = 1600;
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (out) blob = out;
+    }
+    bitmap.close();
+  }
+  const ext = file.type === 'image/png' ? 'png' : 'jpg';
+  const storageRef = ref(storage, `portfolio_photos/${photoId}.${ext}`);
+  await uploadBytes(storageRef, blob);
+  return getDownloadURL(storageRef);
+}
+
 
 // Initialize Firebase Authentication
 export const auth = getAuth(app);

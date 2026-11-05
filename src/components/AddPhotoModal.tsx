@@ -5,7 +5,8 @@
 
 import React, { useState } from 'react';
 import { X, Upload, Image as ImageIcon, Camera, Plus, Check } from 'lucide-react';
-import { PhotoItem, PhotoCategory } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { uploadPhotoToStorage } from '../services/firebase';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
@@ -35,6 +36,10 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [story, setStory] = useState('');
   const [tags, setTags] = useState('kỉ yếu, áo dài trắng, thanh xuân, sony a7 mark 3');
   const [error, setError] = useState('');
+  // File goc nguoi dung chon — chi dung de preview (base64) va upload len Storage.
+  // KHONG luu base64 vao Firestore nua.
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   if (!isOpen) return null;
 
@@ -45,6 +50,9 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
         setError('Kích thước ảnh không vượt quá 8MB');
         return;
       }
+      // Giu File goc de upload len Storage khi submit; preview base64 chi de xem truoc.
+      setSelectedFile(file);
+      setImageUrlInput('');
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -56,14 +64,22 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     }
   };
 
+  const clearImage = () => {
+    setImagePreview('');
+    setSelectedFile(null);
+    setImageUrlInput('');
+  };
+
   const handleUrlApply = () => {
     if (imageUrlInput.trim()) {
+      // Chi dan URL: dung thang URL do, khong upload.
+      setSelectedFile(null);
       setImagePreview(imageUrlInput.trim());
       setError('');
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vietnameseTitle.trim()) {
       setError('Vui lòng nhập tiêu đề tác phẩm');
@@ -74,13 +90,33 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       return;
     }
 
+    const newPhotoId = `custom-photo-${Date.now()}`;
+
+    // Co file: upload len Firebase Storage lay downloadURL roi moi goi onAddPhoto.
+    let imageUrl = imagePreview;
+    if (selectedFile) {
+      setIsUploading(true);
+      setError('');
+      try {
+        imageUrl = await uploadPhotoToStorage(selectedFile, newPhotoId);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        setError(
+          `Tải ảnh lên Storage thất bại: ${detail} Vui lòng kiểm tra Storage rules đã deploy chưa rồi thử lại.`
+        );
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
+
     const tagArray = tags
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean);
 
     const newPhoto: PhotoItem = {
-      id: `custom-photo-${Date.now()}`,
+      id: newPhotoId,
       title: title.trim() || vietnameseTitle.trim(),
       vietnameseTitle: vietnameseTitle.trim(),
       category,
@@ -94,7 +130,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       iso: Number(iso) || 100,
       description: description.trim() || 'Tác phẩm mới được thêm vào bộ sưu tập cá nhân.',
       story: story.trim() || description.trim(),
-      image: imagePreview,
+      image: imageUrl,
       aspectRatio: '4:3',
       orientation: 'landscape',
       tags: tagArray.length > 0 ? tagArray : ['portfolio', 'tác phẩm mới'],
@@ -158,7 +194,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={() => setImagePreview('')}
+                  onClick={clearImage}
                   className="absolute top-2 right-2 p-1.5 rounded-full bg-black/70 text-white hover:bg-black transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -242,11 +278,13 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 onChange={(e) => setCategory(e.target.value as PhotoCategory)}
                 className="w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden"
               >
-                <option value="aodai-trang">Áo dài trắng thanh xuân</option>
-                <option value="kiyieu-nhom">Kỉ yếu nhóm lớp & cử nhân</option>
-                <option value="cophuc">Cổ phục & di sản Việt</option>
-                <option value="aodai-pho">Áo dài dạo phố & tết</option>
-                <option value="nang-tho">Nàng thơ áo dài cận cảnh</option>
+                {(Object.entries(CATEGORY_LABELS) as [PhotoCategory, string][]).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  )
+                )}
               </select>
             </div>
             <div>
@@ -358,9 +396,10 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer"
+              disabled={isUploading}
+              className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-50"
             >
-              Thêm Vào Portfolio
+              {isUploading ? 'Đang tải ảnh lên...' : 'Thêm Vào Portfolio'}
             </button>
           </div>
         </form>
