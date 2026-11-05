@@ -50,9 +50,11 @@ import {
   describePhotoAlt,
   DEFAULT_PACKAGE_PRICES,
   validatePackagePrices,
+  validatePaidAmount,
   type PackagePrices,
 } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
+import { diagnoseCloudConnection } from '../services/firebase';
 import { ProofingManager } from './ProofingManager';
 import {
   DEFAULT_SITE_CONTENT,
@@ -102,6 +104,12 @@ interface DashboardViewProps {
   contentUpdatedAt?: string;
   /** Luu noi dung moi (App ghi Firestore + setState); khong truyen thi nut Luu bao loi. */
   onSaveSiteContent?: (content: SiteContent) => Promise<void>;
+  /**
+   * (v7.5) Dong bo lai tra cuu cho cac don cu (App goi syncAllPublicOrders
+   * tren leads hien co, tra ve so don da dong bo). Khong truyen thi nut
+   * dong bo o tab Cai dat bao loi.
+   */
+  onSyncPublicOrders?: () => Promise<number>;
 }
 
 /* ---- Helpers nội bộ cho Dashboard (chỉ dùng trong file này) ---- */
@@ -341,6 +349,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   siteContent,
   contentUpdatedAt,
   onSaveSiteContent,
+  onSyncPublicOrders,
 }) => {
   const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
 
@@ -719,6 +728,91 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
   };
 
+  // --- (v7.5) Tien da thu cua tung don ---
+  // Nhap TONG tien da thu (khong phai them tung lan): o nhap hien so dang
+  // co, go so tho thi tu dinh dang 650.000. Luu qua onUpdateLead — App
+  // tinh lai balance = max(0, estimatedPrice - paidAmount) va luu Cloud
+  // (ca booking_leads lan public_orders) nen Dashboard khong tu tinh.
+  const [paidAmountDrafts, setPaidAmountDrafts] = useState<Record<string, string>>({});
+  const [paidAmountErrors, setPaidAmountErrors] = useState<Record<string, string>>({});
+  const [isSavingPaidId, setIsSavingPaidId] = useState<string | null>(null);
+
+  const handleSavePaidAmount = (lead: BookingLead) => {
+    const raw = paidAmountDrafts[lead.id] ?? formatPriceText(lead.paidAmount || 0);
+    const value = parsePriceText(raw);
+    const error = validatePaidAmount(value, lead.estimatedPrice || 0);
+    if (error) {
+      setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: error }));
+      return;
+    }
+    if (!onUpdateLead) {
+      setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: 'Không lưu được (chưa có onUpdateLead).' }));
+      return;
+    }
+    setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: '' }));
+    setIsSavingPaidId(lead.id);
+    try {
+      onUpdateLead(lead.id, { paidAmount: value });
+      // Xoa nhap tam de lan mo sau hien so moi vua luu (tu lead prop).
+      setPaidAmountDrafts((prev) => {
+        const next = { ...prev };
+        delete next[lead.id];
+        return next;
+      });
+      triggerCopyToast('Đã lưu tiền đã thu');
+    } finally {
+      setIsSavingPaidId(null);
+    }
+  };
+
+  // (v7.5) Dong bo lai tra cuu cho cac don cu (tab Cai dat, muc 4).
+  const [isSyncingOrders, setIsSyncingOrders] = useState(false);
+  const [syncOrdersMsg, setSyncOrdersMsg] = useState<string | null>(null);
+
+  // (v7.6) Tu chan doan ket noi Cloud: kiem tra dang nhap + test that
+  // Firestore va Storage. Khong ghi them du lieu len Cloud khi kiem tra.
+  const [diagResult, setDiagResult] = useState<{ ok: boolean; firestore: string; storage: string } | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+
+  const handleDiagnoseCloud = async () => {
+    setDiagResult(null);
+    setIsDiagnosing(true);
+    try {
+      setDiagResult(await diagnoseCloudConnection());
+    } catch (e: any) {
+      const msg = e?.message || 'Kiểm tra kết nối thất bại, vui lòng thử lại.';
+      setDiagResult({ ok: false, firestore: `Firestore: Lỗi — ${msg}`, storage: `Storage: Lỗi — ${msg}` });
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+  const [syncOrdersError, setSyncOrdersError] = useState<string | null>(null);
+
+  const handleSyncPublicOrders = async () => {
+    if (!isAdmin) {
+      setSyncOrdersError('Chỉ quản trị viên mới được đồng bộ tra cứu. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
+      setSyncOrdersMsg(null);
+      return;
+    }
+    if (!onSyncPublicOrders) {
+      setSyncOrdersError('Chưa cấu hình đồng bộ tra cứu (thiếu onSyncPublicOrders) — chưa đồng bộ được.');
+      setSyncOrdersMsg(null);
+      return;
+    }
+    setSyncOrdersError(null);
+    setSyncOrdersMsg(null);
+    setIsSyncingOrders(true);
+    try {
+      const count = await onSyncPublicOrders();
+      setSyncOrdersMsg(`Đã đồng bộ tra cứu cho ${count} đơn — khách tra được trên mọi máy bằng mã đơn + SĐT.`);
+      triggerCopyToast(`Đã đồng bộ tra cứu cho ${count} đơn!`);
+    } catch (e: any) {
+      setSyncOrdersError(e?.message || 'Đồng bộ tra cứu thất bại, vui lòng thử lại.');
+    } finally {
+      setIsSyncingOrders(false);
+    }
+  };
+
   // Luu trang thai + ngay hen goi lai (+ ly do huy neu chon cancelled).
   // Trang thai chi duoc doi khi bam Luu; huy ma khong co ly do thi bao loi, khong doi.
   const handleSaveLeadStatus = (lead: BookingLead) => {
@@ -758,6 +852,87 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       return next;
     });
     triggerCopyToast('Đã cập nhật trạng thái khách hàng!');
+  };
+
+  // (v7.5) Muc "Tien da thu" dung chung cho ca bang desktop va the mobile:
+  // hien Da thu / Tien coc / Con lai, o nhap TONG tien da thu (tu dinh
+  // dang 650.000 khi go), nut Luu + 2 nut nhanh. Chi admin sua duoc
+  // (Dashboard chi admin vao duoc; nut Luu cung kiem tra onUpdateLead).
+  const renderPaidAmountEditor = (lead: BookingLead) => {
+    const draft = paidAmountDrafts[lead.id] ?? formatPriceText(lead.paidAmount || 0);
+    const error = paidAmountErrors[lead.id];
+    const remaining = leadBalance(lead);
+    return (
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+          <span className="text-neutral-500 dark:text-neutral-400">
+            Đã thu: <span className="font-sans tabular-nums font-semibold text-neutral-800 dark:text-neutral-200">{formatVND(lead.paidAmount || 0)}</span>
+          </span>
+          <span className="text-neutral-500 dark:text-neutral-400">
+            Tiền cọc: <span className="font-sans tabular-nums font-semibold text-neutral-800 dark:text-neutral-200">{formatVND(lead.depositAmount || 0)}</span>
+          </span>
+          <span className="text-neutral-500 dark:text-neutral-400">
+            Còn lại: <span className="font-sans tabular-nums font-semibold text-amber-600 dark:text-amber-400">{formatVND(remaining)}</span>
+          </span>
+        </div>
+        <label className="block text-xs">
+          <span className="text-neutral-600 dark:text-neutral-400">Tiền đã thu (VNĐ) — nhập TỔNG số tiền khách đã trả</span>
+          <span className="mt-1 flex items-center gap-1.5">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={draft}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/[^0-9]/g, '');
+                setPaidAmountDrafts((prev) => ({
+                  ...prev,
+                  [lead.id]: digits ? formatPriceText(Number(digits)) : '',
+                }));
+                setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: '' }));
+              }}
+              className="w-full px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
+              aria-label={`Tiền đã thu của đơn ${lead.id}`}
+            />
+            <span className="text-neutral-500 font-sans tabular-nums shrink-0">đ</span>
+          </span>
+        </label>
+        {error && (
+          <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{error}</p>
+        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => handleSavePaidAmount(lead)}
+            disabled={isSavingPaidId === lead.id}
+            className="px-2.5 py-1 text-xs font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer disabled:opacity-60"
+          >
+            Lưu tiền đã thu
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPaidAmountDrafts((prev) => ({ ...prev, [lead.id]: formatPriceText(lead.depositAmount || 0) }));
+              setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: '' }));
+            }}
+            className="px-2 py-1 text-xs font-medium rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+            title={`Điền tiền đã thu = tiền cọc ${formatVND(lead.depositAmount || 0)}`}
+          >
+            Đã nhận đủ cọc
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPaidAmountDrafts((prev) => ({ ...prev, [lead.id]: formatPriceText(lead.estimatedPrice || 0) }));
+              setPaidAmountErrors((prev) => ({ ...prev, [lead.id]: '' }));
+            }}
+            className="px-2 py-1 text-xs font-medium rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+            title={`Điền tiền đã thu = tổng tiền đơn ${formatVND(lead.estimatedPrice || 0)}`}
+          >
+            Đã thu đủ
+          </button>
+        </div>
+      </div>
+    );
   };
 
   const handleCreateManualLeadSubmit = (e: React.FormEvent) => {
@@ -1212,7 +1387,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <th className="py-3 px-4 font-semibold">Gói Chụp & Giá</th>
                       <th className="py-3 px-4 font-semibold">Ngày & Địa Điểm</th>
                       <th className="py-3 px-4 font-semibold">Khung Giờ</th>
-                      <th className="py-3 px-4 font-semibold">Tiền Cọc</th>
+                      <th className="py-3 px-4 font-semibold">Tiền Đã Thu</th>
                       <th className="py-3 px-4 font-semibold">Còn Lại</th>
                       <th className="py-3 px-4 font-semibold">Trạng Thái</th>
                       <th className="py-3 px-4 font-semibold">Ghi Chú Tư Vấn</th>
@@ -1342,14 +1517,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               )}
                             </td>
 
-                            {/* Deposit column */}
-                            <td className="py-4 px-4 align-top">
-                              <div className="font-sans tabular-nums font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
-                                {formatVND(lead.depositAmount || 0)}
-                              </div>
-                              <div className="text-neutral-400 text-xs mt-0.5 whitespace-nowrap">
-                                Đã thu: {formatVND(lead.paidAmount || 0)}
-                              </div>
+                            {/* (v7.5) Tien da thu — nhap tong tien da thu, luu qua onUpdateLead */}
+                            <td className="py-4 px-4 align-top min-w-56">
+                              {renderPaidAmountEditor(lead)}
                             </td>
 
                             {/* Remaining balance column */}
@@ -1636,6 +1806,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             {formatVND(leadBalance(lead))}
                           </span>
                         </div>
+                      </div>
+                      {/* (v7.5) Tien da thu — nhap tong tien da thu, luu qua onUpdateLead */}
+                      <div className="pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                        {renderPaidAmountEditor(lead)}
                       </div>
                       <div className="flex items-center gap-2 pt-1">
                         <a
@@ -2175,6 +2349,96 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   ⚠️ Giá mới áp dụng ngay cho đơn đặt mới, đơn cũ giữ giá lúc đặt.
                 </p>
+              </div>
+
+              {/* (v7.5) Dong bo tra cuu don cho khach — CHI ADMIN */}
+              <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-xs font-sans tabular-nums uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  4. ĐỒNG BỘ TRA CỨU ĐƠN CHO KHÁCH
+                </div>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Khách tra cứu đơn bằng mã đơn + SĐT ở mục Liên hệ, tra được trên mọi máy
+                  (không còn chỉ tra được trên máy đã đặt). Đơn mới tạo hoặc vừa sửa
+                  (tiền đã thu, link Drive, trạng thái) sẽ tự đồng bộ. Các đơn tạo
+                  trước bản v7.5 chưa có bản ghi tra cứu — bấm nút dưới đây để đồng bộ
+                  lại toàn bộ 1 lần.
+                </p>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Chỉ đồng bộ tên, SĐT (để đối chiếu), gói, ngày chụp, trạng thái, tiền
+                  cọc / đã thu / còn lại và link Drive — không đồng bộ email, ghi chú
+                  nội bộ hay lý do hủy.
+                </p>
+                {!isAdmin && (
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                    Bạn đang xem với quyền khách — chỉ quản trị viên (anhyenk26@gmail.com) mới được
+                    đồng bộ tra cứu.
+                  </div>
+                )}
+                {syncOrdersError && (
+                  <div role="alert" className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                    {syncOrdersError}
+                  </div>
+                )}
+                {syncOrdersMsg && (
+                  <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400">{syncOrdersMsg}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSyncPublicOrders}
+                    disabled={isSyncingOrders || !isAdmin}
+                    className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    {isSyncingOrders ? 'Đang đồng bộ...' : 'Đồng bộ lại tra cứu cho các đơn cũ'}
+                  </button>
+                  <span className="text-xs text-neutral-500">
+                    Hiện có {leads.length} đơn trong Dashboard.
+                  </span>
+                </div>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  ⚠️ Phải deploy lại firestore.rules (bản v7.5, thêm collection public_orders)
+                  thì tra cứu mọi máy mới chạy — xem PAGES-NOTES-V7.5.md.
+                </p>
+              </div>
+
+              {/* (v7.6) Tu chan doan ket noi Cloud — CHI ADMIN */}
+              <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-xs font-sans tabular-nums uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  5. KIỂM TRA KẾT NỐI CLOUD
+                </div>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Khi lưu đơn / giá / nội dung mà banner đỏ báo lỗi, hoặc tải ảnh kẹt ở 0%,
+                  bấm nút dưới đây để biết đúng nguyên nhân: kiểm tra đã đăng nhập Google
+                  chưa, đọc thử 1 dữ liệu từ Firestore, và tải thử 1 file nhỏ (1KB) lên
+                  Storage rồi xoá ngay. Không ghi thêm dữ liệu nào lên Cloud khi kiểm tra.
+                </p>
+                {diagResult && (
+                  <div
+                    role={diagResult.ok ? 'status' : 'alert'}
+                    className={
+                      diagResult.ok
+                        ? 'p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 space-y-1'
+                        : 'p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 space-y-1'
+                    }
+                  >
+                    <p>{diagResult.firestore}</p>
+                    <p>{diagResult.storage}</p>
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDiagnoseCloud}
+                    disabled={isDiagnosing}
+                    className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    {isDiagnosing ? 'Đang kiểm tra...' : 'Kiểm tra kết nối Cloud'}
+                  </button>
+                  <span className="text-xs text-neutral-500">
+                    Nếu báo lỗi quyền (permission-denied), xem PAGES-NOTES-V7.6.md để deploy
+                    rules đúng database.
+                  </span>
+                </div>
               </div>
             </div>
           </div>

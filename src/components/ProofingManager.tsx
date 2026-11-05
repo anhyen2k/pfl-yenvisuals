@@ -19,6 +19,7 @@ import {
   MAX_PROOFING_PHOTOS_PER_LEAD,
   MAX_PROOFING_FILE_BYTES,
   extractPhoneSuffix,
+  translateCloudError,
   type BookingLead,
   type ProofingPhoto,
   type ProofingSelection,
@@ -28,7 +29,25 @@ import {
   uploadProofingPhoto,
   deleteProofingPhoto,
   loadProofingSelection,
+  compressImageFile,
+  PROOFING_MAX_DIMENSION,
+  PROOFING_JPEG_QUALITY,
 } from '../services/firebase';
+import { uploadQueue, mapWithConcurrency, MAX_CONCURRENT_UPLOADS } from '../services/uploadQueue';
+
+/** 1 file proofing Yen vua chon, dang cho tai len (v7.7): nen ngay khi
+ *  chon xong (song song toi da 4 file), hien thumbnail xem truoc ngay;
+ *  bam "Tai len" thi chi con buoc tai qua hang doi chung. */
+interface PendingProofingFile {
+  key: string;
+  file: File;
+  name: string;
+  previewUrl: string;
+  compressedBlob: Blob | null;
+  status: 'compressing' | 'ready' | 'uploading' | 'done' | 'error';
+  progress: number;
+  error?: string;
+}
 
 interface ProofingManagerProps {
   lead: BookingLead;
@@ -40,9 +59,8 @@ export const ProofingManager: React.FC<ProofingManagerProps> = ({ lead, onToast 
   const [selection, setSelection] = useState<ProofingSelection | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [uploadError, setUploadError] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<PendingProofingFile[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -77,8 +95,8 @@ export const ProofingManager: React.FC<ProofingManagerProps> = ({ lead, onToast 
     // Reset input de chon lai cung file van chay.
     e.target.value = '';
     if (files.length === 0) return;
-    if (photos.length + files.length > MAX_PROOFING_PHOTOS_PER_LEAD) {
-      setUploadError(`Mỗi đơn tối đa ${MAX_PROOFING_PHOTOS_PER_LEAD} ảnh (đơn này đã có ${photos.length} ảnh).`);
+    if (photos.length + pendingFiles.length + files.length > MAX_PROOFING_PHOTOS_PER_LEAD) {
+      setUploadError(`Mỗi đơn tối đa ${MAX_PROOFING_PHOTOS_PER_LEAD} ảnh (đơn này đã có ${photos.length} ảnh, đang chờ ${pendingFiles.length} ảnh).`);
       return;
     }
     const oversize = files.filter((f) => f.size > MAX_PROOFING_FILE_BYTES);
@@ -95,40 +113,108 @@ export const ProofingManager: React.FC<ProofingManagerProps> = ({ lead, onToast 
       return;
     }
     setUploadError('');
-    setIsUploading(true);
-    const progress: Record<string, number> = {};
-    try {
-      // Up tuan tu de tien do % tung anh ro rang, mang yeu khong bi nghen.
-      for (let i = 0; i < valid.length; i++) {
-        const file = valid[i];
-        const key = `${file.name}-${i}`;
-        progress[key] = 0;
-        setUploadProgress({ ...progress });
-        const uploaded = await uploadProofingPhoto(
-          file,
-          lead.id,
-          phoneSuffix,
-          photos.length + i,
-          (pct) => {
-            progress[key] = pct;
-            setUploadProgress({ ...progress });
-          }
-        );
-        setPhotos((prev) => [...prev, uploaded].sort((a, b) => a.order - b.order));
-        progress[key] = 100;
-        setUploadProgress({ ...progress });
+    // (v7.7) Hien thumbnail xem truoc NGAY, roi NEN NGAY luc chon (song
+    // song toi da 4 file) — trong luc Yen xem lai danh sach thi may da
+    // nen xong, bam "Tai len" chi con buoc tai.
+    const now = Date.now();
+    const entries: PendingProofingFile[] = valid.map((file, i) => ({
+      key: `${file.name}-${now}-${i}`,
+      file,
+      name: file.name,
+      previewUrl: URL.createObjectURL(file),
+      compressedBlob: null,
+      status: 'compressing',
+      progress: 0,
+    }));
+    setPendingFiles((prev) => [...prev, ...entries]);
+    const results = await mapWithConcurrency(
+      entries,
+      MAX_CONCURRENT_UPLOADS,
+      async (entry) => {
+        try {
+          return await compressImageFile(entry.file, {
+            maxDimension: PROOFING_MAX_DIMENSION,
+            quality: PROOFING_JPEG_QUALITY,
+          });
+        } catch {
+          return entry.file;
+        }
       }
-      onToast(`Đã up ${valid.length} ảnh proofing cho đơn ${lead.id}.`);
-    } catch (err) {
-      console.warn('Proofing upload error:', err);
-      setUploadError(
-        `Up ảnh thất bại: ${err instanceof Error ? err.message : String(err)} Kiểm tra đã đăng nhập admin và deploy storage.rules/firestore.rules chưa.`
-      );
-    } finally {
-      setIsUploading(false);
-      setUploadProgress({});
-    }
+    );
+    setPendingFiles((prev) =>
+      prev.map((p) => {
+        const idx = entries.findIndex((en) => en.key === p.key);
+        if (idx < 0) return p;
+        const res = results[idx];
+        return res.ok
+          ? { ...p, compressedBlob: res.value, status: 'ready' as const }
+          : { ...p, compressedBlob: p.file, status: 'ready' as const };
+      })
+    );
   };
+
+  const updatePending = (key: string, patch: Partial<PendingProofingFile>) => {
+    setPendingFiles((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+  };
+
+  const removePending = (key: string) => {
+    setPendingFiles((prev) => {
+      const target = prev.find((p) => p.key === key);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((p) => p.key !== key);
+    });
+  };
+
+  /** Tai cac anh da nen xong len Cloud qua hang doi chung (song song toi
+   *  da 4 anh, moi anh tu thu lai toi da 3 lan). Anh nao xong thi them
+   *  ngay vao luoi da up; anh loi thi de lai nut thu lai. */
+  const handleUploadPending = () => {
+    const ready = pendingFiles.filter((p) => p.status === 'ready' || p.status === 'error');
+    if (ready.length === 0) return;
+    setUploadError('');
+    const baseOrder = photos.length;
+    ready.forEach((entry, i) => {
+      const order = baseOrder + i;
+      updatePending(entry.key, { status: 'uploading', progress: 0, error: undefined });
+      uploadQueue.enqueue({
+        id: `proofing-${lead.id}-${entry.key}`,
+        label: entry.name,
+        status: 'queued',
+        progress: 0,
+        attempts: 0,
+        run: async (onProgress) => {
+          const uploaded = await uploadProofingPhoto(
+            entry.file,
+            lead.id,
+            phoneSuffix,
+            order,
+            (pct) => {
+              updatePending(entry.key, { progress: pct });
+              onProgress(pct);
+            },
+            entry.compressedBlob
+          );
+          setPhotos((prev) => [...prev, uploaded].sort((a, b) => a.order - b.order));
+          updatePending(entry.key, { status: 'done', progress: 100 });
+          URL.revokeObjectURL(entry.previewUrl);
+        },
+        onError: (err) => {
+          updatePending(entry.key, { status: 'error', error: translateCloudError(err) });
+          console.warn('Proofing background upload error:', entry.name, err);
+        },
+      });
+    });
+    // Don het anh loi: xoa cac anh da xong khoi danh sach cho sau vai giay
+    // (chip tien do chung cung tu an khi xong).
+    setTimeout(() => {
+      setPendingFiles((prev) => prev.filter((p) => p.status !== 'done'));
+    }, 5000);
+  };
+
+  const pendingReadyCount = pendingFiles.filter((p) => p.status === 'ready' || p.status === 'error').length;
+  const pendingCompressingCount = pendingFiles.filter((p) => p.status === 'compressing').length;
+  const pendingUploadingCount = pendingFiles.filter((p) => p.status === 'uploading').length;
+  const pendingDoneCount = pendingFiles.filter((p) => p.status === 'done').length;
 
   const handleDelete = async (photo: ProofingPhoto) => {
     if (!window.confirm(`Xoá ảnh #${photo.order + 1} khỏi đơn ${lead.id}? Khách sẽ không xem được ảnh này nữa.`)) return;
@@ -168,11 +254,11 @@ export const ProofingManager: React.FC<ProofingManagerProps> = ({ lead, onToast 
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading || photos.length >= MAX_PROOFING_PHOTOS_PER_LEAD}
+            disabled={photos.length + pendingFiles.length >= MAX_PROOFING_PHOTOS_PER_LEAD}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer disabled:opacity-60"
           >
-            {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            <span>{isUploading ? 'Đang up...' : 'Chọn ảnh proofing'}</span>
+            <Upload className="w-3.5 h-3.5" />
+            <span>Chọn ảnh proofing</span>
           </button>
           <input
             ref={fileInputRef}
@@ -201,17 +287,89 @@ export const ProofingManager: React.FC<ProofingManagerProps> = ({ lead, onToast 
         </div>
       )}
 
-      {Object.keys(uploadProgress).length > 0 && (
-        <div className="space-y-1">
-          {Object.entries(uploadProgress).map(([key, pct]) => (
-            <div key={key} className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
-              <span className="truncate max-w-55 font-sans tabular-nums">{key}</span>
-              <div className="flex-1 h-1.5 rounded bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
-                <div className="h-full bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
-              </div>
-              <span className="font-sans tabular-nums w-9 text-right">{pct}%</span>
+      {/* (v7.7) Anh vua chon: hien thumbnail ngay, nen xong thi bam "Tai
+          len" de tai song song toi da 4 anh qua hang doi chung. */}
+      {pendingFiles.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-neutral-900 p-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-neutral-900 dark:text-white">
+              Ảnh vừa chọn ({pendingFiles.length} ảnh
+              {pendingCompressingCount > 0 && ` · đang nén ${pendingCompressingCount}`}
+              {pendingUploadingCount > 0 && ` · đang up ${pendingUploadingCount}`} · đã xong{' '}
+              {pendingDoneCount}/{pendingFiles.length} ảnh)
             </div>
-          ))}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingFiles((prev) => {
+                  prev.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+                  return [];
+                })}
+                disabled={pendingUploadingCount > 0}
+                className="px-2.5 py-1.5 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                Huỷ tất cả
+              </button>
+              <button
+                type="button"
+                onClick={handleUploadPending}
+                disabled={pendingReadyCount === 0}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer disabled:opacity-60"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Tải lên {pendingReadyCount} ảnh</span>
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
+            {pendingFiles.map((entry) => (
+              <div key={entry.key} className="relative rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900">
+                <div className="aspect-square">
+                  <img src={entry.previewUrl} alt={entry.name} className="w-full h-full object-cover" />
+                </div>
+                <div className="px-1.5 py-1 text-xs leading-tight">
+                  <div className="truncate text-neutral-700 dark:text-neutral-300" title={entry.name}>{entry.name}</div>
+                  {entry.status === 'compressing' && (
+                    <div className="text-neutral-500 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Đang nén…
+                    </div>
+                  )}
+                  {entry.status === 'ready' && <div className="text-emerald-600">Đã nén xong — chờ tải lên</div>}
+                  {entry.status === 'uploading' && (
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex-1 h-1.5 rounded bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                        <div className="h-full bg-amber-500 transition-all" style={{ width: `${entry.progress}%` }} />
+                      </div>
+                      <span className="font-sans tabular-nums">{entry.progress}%</span>
+                    </div>
+                  )}
+                  {entry.status === 'done' && (
+                    <div className="text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Đã xong
+                    </div>
+                  )}
+                  {entry.status === 'error' && (
+                    <div className="text-rose-600 dark:text-rose-400" title={entry.error}>
+                      Lỗi — bấm &quot;Tải lên&quot; để thử lại
+                    </div>
+                  )}
+                </div>
+                {(entry.status === 'ready' || entry.status === 'error' || entry.status === 'compressing') && (
+                  <button
+                    type="button"
+                    onClick={() => removePending(entry.key)}
+                    className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white hover:bg-rose-600 transition-colors cursor-pointer"
+                    title="Bỏ ảnh này khỏi danh sách chờ"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">
+            Ảnh proofing nén còn 1400px (đủ nét để khách chọn), tải song song tối đa 4 ảnh 1 lúc, lỗi thì tự thử lại.
+          </p>
         </div>
       )}
 

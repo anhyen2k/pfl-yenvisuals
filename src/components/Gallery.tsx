@@ -13,8 +13,10 @@ import {
   MessageCircle,
   Copy,
   Check,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
-import { PhotoItem, PhotoCategory, describePhotoAlt } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, describePhotoAlt, type PhotoSyncStatus } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
 
 interface GalleryProps {
@@ -31,6 +33,11 @@ interface GalleryProps {
   isAdmin?: boolean;
   onEditPhoto?: (photo: PhotoItem) => void;
   onDeletePhoto?: (photoId: string) => void;
+  /** (v7.7) Trang thai dong bo nen cua tung anh (chi admin thay): dang tai
+   *  len thi hien "Dang dong bo…", loi het 3 lan thi hien "Chua dong bo —
+   *  bam de thu lai". */
+  syncStatusByPhotoId?: Record<string, { status: PhotoSyncStatus; error?: string }>;
+  onRetryPhotoSync?: (photoId: string) => void;
 }
 
 export const Gallery: React.FC<GalleryProps> = ({
@@ -45,6 +52,8 @@ export const Gallery: React.FC<GalleryProps> = ({
   isAdmin = false,
   onEditPhoto,
   onDeletePhoto,
+  syncStatusByPhotoId,
+  onRetryPhotoSync,
 }) => {
   const [copiedFavorites, setCopiedFavorites] = useState(false);
 
@@ -238,6 +247,31 @@ export const Gallery: React.FC<GalleryProps> = ({
 
                   {/* Scrim Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                  {/* (v7.7) Huy hieu dong bo nen — chi admin thay. Anh moi/
+                      anh sua hien ngay bang anh xem truoc local nen can
+                      biet no da len Cloud chua. */}
+                  {isAdmin && syncStatusByPhotoId?.[photo.id] && (
+                    syncStatusByPhotoId[photo.id].status === 'syncing' ? (
+                      <div className="absolute top-3.5 left-3.5 z-20 inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-500/90 text-white text-xs font-semibold shadow">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Đang đồng bộ…
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRetryPhotoSync?.(photo.id);
+                        }}
+                        className="absolute top-3.5 left-3.5 z-20 inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-rose-600/95 text-white text-xs font-semibold shadow hover:bg-rose-500 cursor-pointer"
+                        title={syncStatusByPhotoId[photo.id].error || 'Bấm để thử tải lại lên Cloud'}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        Chưa đồng bộ — bấm để thử lại
+                      </button>
+                    )
+                  )}
 
                   {/* Top Right Actions */}
                   <div className="absolute top-3.5 right-3.5 flex items-center gap-1.5 z-20">

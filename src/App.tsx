@@ -15,6 +15,8 @@ import { Footer } from './components/Footer';
 import { AddPhotoModal } from './components/AddPhotoModal';
 import { EditPhotoModal } from './components/EditPhotoModal';
 import { DeletePhotoModal } from './components/DeletePhotoModal';
+import { UploadQueueChip } from './components/UploadQueueChip';
+import { uploadQueue } from './services/uploadQueue';
 import { BookingModal } from './components/BookingModal';
 import { ClientProofingModal } from './components/ClientProofingModal';
 import { ZaloQrModal } from './components/ZaloQrModal';
@@ -49,6 +51,10 @@ import {
   getPackageDetails,
   sendBookingEmailReal,
   isAdminEmail,
+  translateCloudError,
+  mergeOptimisticPhotos,
+  type PhotoSyncStatus,
+  type PendingPhotoUpload,
   UserRole,
   DEFAULT_PACKAGE_PRICES,
   type PackagePrices,
@@ -64,6 +70,7 @@ import {
   updatePhotoInCloud,
   deletePhotoFromCloud,
   deletePhotoFromStorage,
+  uploadPhotoWithThumbnail,
   seedMissingPortfolioPhotos,
   subscribeToPortfolioPhotos,
   loadPackagePrices,
@@ -74,6 +81,9 @@ import {
   loadSiteContentMeta,
   saveSiteContent,
   subscribeToSiteContent,
+  savePublicOrder,
+  syncAllPublicOrders,
+  deletePublicOrder,
   SITE_CONTENT_CACHE_KEY,
   SITE_CONTENT_UPDATED_AT_KEY,
   logoutUser,
@@ -175,7 +185,13 @@ export default function App() {
     if (userRole !== 'admin') {
       throw new Error('Chỉ quản trị viên mới được đổi giá. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
     }
-    await savePackagePrices(prices);
+    // (v7.6) Loi Firebase thi nem lai da dich sang tieng Viet de Dashboard
+    // hien ly do that (vd permission-denied do deploy nham database).
+    try {
+      await savePackagePrices(prices);
+    } catch (e) {
+      throw new Error(translateCloudError(e));
+    }
     setPackagePrices(prices);
     const nowStr = new Date().toLocaleString('vi-VN', {
       hour: '2-digit',
@@ -242,7 +258,12 @@ export default function App() {
     if (userRole !== 'admin') {
       throw new Error('Chỉ quản trị viên mới được sửa nội dung giao diện. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
     }
-    await saveSiteContent(content);
+    // (v7.6) Loi Firebase thi nem lai da dich sang tieng Viet (xem tren).
+    try {
+      await saveSiteContent(content);
+    } catch (e) {
+      throw new Error(translateCloudError(e));
+    }
     setSiteContent(content);
     const nowStr = new Date().toLocaleString('vi-VN', {
       hour: '2-digit',
@@ -256,6 +277,21 @@ export default function App() {
       localStorage.setItem(SITE_CONTENT_CACHE_KEY, JSON.stringify(content));
       localStorage.setItem(SITE_CONTENT_UPDATED_AT_KEY, nowStr);
     } catch {}
+  };
+
+  // (v7.5) Dashboard -> tab Cai dat: dong bo lai tra cuu cho cac don cu
+  // (don tao truoc v7.5 chua co ban ghi public_orders). Chi admin.
+  // Tra ve so don da dong bo de Dashboard bao toast.
+  const handleSyncPublicOrders = async (): Promise<number> => {
+    if (userRole !== 'admin') {
+      throw new Error('Chỉ quản trị viên mới được đồng bộ tra cứu. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
+    }
+    // (v7.6) Loi Firebase thi nem lai da dich sang tieng Viet (xem tren).
+    try {
+      return await syncAllPublicOrders(leads);
+    } catch (e) {
+      throw new Error(translateCloudError(e));
+    }
   };
 
   // Leads & Contact Inquiries state
@@ -323,6 +359,21 @@ export default function App() {
   const [photosLoading, setPhotosLoading] = useState(true);
   const [photosError, setPhotosError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // (v7.7) Anh dang dong bo ngam (optimistic UI): anh moi / anh sua hien
+  // ngay bang URL xem truoc local, chi ton tai trong bo nho — KHONG ghi
+  // vao localStorage (blob URL chet sau khi tai lai trang) va KHONG tron
+  // vao `photos` (subscription Firestore thay toan bo danh sach bang ban
+  // Cloud nen anh lac quan ma tron vao se bi xoa). pendingUploadFiles giu
+  // file goc + blob da nen de bam "thu lai" khi dong bo loi.
+  const [pendingPhotos, setPendingPhotos] = useState<PhotoItem[]>([]);
+  const [pendingEdits, setPendingEdits] = useState<Record<string, string>>({});
+  const [photoSync, setPhotoSync] = useState<
+    Record<string, { status: PhotoSyncStatus; error?: string }>
+  >({});
+  const pendingUploadFiles = React.useRef(
+    new Map<string, { upload: PendingPhotoUpload; photo: PhotoItem; isEdit: boolean }>()
+  );
   const [bookingPackage, setBookingPackage] = useState<BookingInquiry['packageType'] | undefined>(undefined);
 
   // Modal states
@@ -594,9 +645,12 @@ export default function App() {
   // Filtered photos computation using decoupled pure logic
   const seriesTitleById: Record<string, string> = {};
   PHOTO_SERIES.forEach((sr) => { seriesTitleById[sr.id] = `${sr.title} ${sr.vietnameseTitle}`; });
+  // (v7.7) Anh dang dong bo hien cung danh sach anh Cloud (anh moi len
+  // truoc, anh sua hien ban xem truoc moi nhat).
+  const allPhotosForDisplay = mergeOptimisticPhotos(photos, pendingPhotos, pendingEdits);
   const seriesFilteredPhotos = selectedSeriesId
-    ? photos.filter((ph) => ph.seriesId === selectedSeriesId)
-    : photos;
+    ? allPhotosForDisplay.filter((ph) => ph.seriesId === selectedSeriesId)
+    : allPhotosForDisplay;
   const displayedPhotos = filterPhotos(
     seriesFilteredPhotos,
     selectedCategory,
@@ -613,43 +667,161 @@ export default function App() {
     );
   };
 
-  const reportSyncError = (msg: string) => {
-    setSyncError(msg);
-    window.alert(msg);
+  // (v7.6) Banner do hien LY DO THAT cua loi Cloud (ma loi + huong dan),
+  // khong con cau chung chung "vui long thu lai". Loi that truoc day chi
+  // nam trong console.warn nen Yen khong biet vi sao luu that bai.
+  const reportSyncError = (msg: string, err?: unknown) => {
+    const fullMsg = err === undefined ? msg : `${msg} ${translateCloudError(err)}`;
+    setSyncError(fullMsg);
+    window.alert(fullMsg);
   };
 
   const handleEditPhoto = (photo: PhotoItem) => {
     setEditingPhoto(photo);
   };
 
-  const handleSaveEditedPhoto = (updatedPhoto: PhotoItem) => {
+  // (v7.7) Dua viec tai anh portfolio vao hang doi nen: anh da hien ngay
+  // trong Gallery bang URL xem truoc local; job chay toi da 4 cung luc,
+  // tu thu lai toi da 3 lan. Xong thi doi URL local sang URL Cloud va
+  // ghi doc Firestore; loi het 3 lan thi de huy hieu "Chua dong bo" tren
+  // anh + bao loi 1 lan (khong spam moi lan thu lai).
+  const enqueuePortfolioPhotoUpload = (
+    photo: PhotoItem,
+    upload: PendingPhotoUpload,
+    isEdit: boolean
+  ) => {
+    pendingUploadFiles.current.set(photo.id, { upload, photo, isEdit });
+    setPhotoSync((prev) => ({ ...prev, [photo.id]: { status: 'syncing' } }));
+    uploadQueue.enqueue({
+      id: `photo-${photo.id}`,
+      label: photo.vietnameseTitle || photo.title || 'Ảnh portfolio',
+      status: 'queued',
+      progress: 0,
+      attempts: 0,
+      run: async (onProgress) => {
+        const uploaded = await uploadPhotoWithThumbnail(
+          upload.file,
+          photo.id,
+          onProgress,
+          upload.compressedBlob ?? undefined
+        );
+        const cloudPhoto: PhotoItem = {
+          ...photo,
+          image: uploaded.url,
+          thumbUrl: uploaded.thumbUrl,
+        };
+        if (isEdit) {
+          setPendingEdits((prev) => {
+            const next = { ...prev };
+            delete next[photo.id];
+            return next;
+          });
+        }
+        // Anh moi xong thi go khoi danh sach lac quan; anh sua ma von la
+        // anh moi dang dong bo thi cung go khoi day (vi photos se giu
+        // ban Cloud ngay ben duoi) — tranh hien trung 2 anh khi
+        // subscription Firestore tra ve doc Cloud.
+        setPendingPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+        setPhotoSync((prev) => {
+          const next = { ...prev };
+          delete next[photo.id];
+          return next;
+        });
+        setPhotos((prev) => {
+          const exists = prev.some((p) => p.id === photo.id);
+          const updated = exists
+            ? prev.map((p) => (p.id === photo.id ? cloudPhoto : p))
+            : [cloudPhoto, ...prev.filter((p) => p.id !== photo.id)];
+          try {
+            localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+        if (upload.previewUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(upload.previewUrl);
+        }
+        await savePhotoToCloud(cloudPhoto);
+      },
+      onError: (err) => {
+        setPhotoSync((prev) => ({
+          ...prev,
+          [photo.id]: { status: 'error', error: translateCloudError(err) },
+        }));
+        reportSyncError(
+          'Tải ảnh lên đám mây thất bại, ảnh vẫn hiện trên web nhưng chưa đồng bộ. Bấm vào ảnh để thử lại.',
+          err
+        );
+        console.warn('Cloud Storage photo background upload error:', err);
+      },
+    });
+  };
+
+  /** Bam vao huy hieu "Chua dong bo" tren anh (hoac nut Thu lai o chip)
+   *  de chay lai job tai anh do. */
+  const handleRetryPhotoSync = (photoId: string) => {
+    const entry = pendingUploadFiles.current.get(photoId);
+    if (!entry) return;
+    enqueuePortfolioPhotoUpload(entry.photo, entry.upload, entry.isEdit);
+  };
+
+  const handleSaveEditedPhoto = (updatedPhoto: PhotoItem, upload?: PendingPhotoUpload) => {
     // Neu anh nay duoc ghim featured thi bo ghim cac anh khac (ca local lan
     // Cloud) — truoc day chi luu anh nay nen Firestore co the co nhieu anh
     // cung featured, Hero se lay anh dau tien mot cach kho doan.
     const previouslyFeatured = updatedPhoto.featured
       ? photos.filter((p) => p.featured && p.id !== updatedPhoto.id)
       : [];
-    setPhotos((prev) => {
-      const updated = prev.map((p) => {
-        if (p.id === updatedPhoto.id) return updatedPhoto;
-        if (updatedPhoto.featured && p.featured) return { ...p, featured: false };
-        return p;
+    if (upload) {
+      // (v7.7) Doi file moi: hien ngay ban xem truoc local, tai ngam.
+      // Chi luu metadata (giu URL anh cu) vao photos/localStorage —
+      // URL blob: khong bao gio duoc ghi vao localStorage vi se chet
+      // sau khi tai lai trang.
+      const metaOnlyPhoto: PhotoItem = {
+        ...updatedPhoto,
+        image: photos.find((p) => p.id === updatedPhoto.id)?.image ?? updatedPhoto.image,
+        thumbUrl: photos.find((p) => p.id === updatedPhoto.id)?.thumbUrl,
+      };
+      setPendingEdits((prev) => ({ ...prev, [updatedPhoto.id]: upload.previewUrl }));
+      setPhotos((prev) => {
+        const updated = prev.map((p) => {
+          if (p.id === updatedPhoto.id) return metaOnlyPhoto;
+          if (updatedPhoto.featured && p.featured) return { ...p, featured: false };
+          return p;
+        });
+        localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
+        return updated;
       });
-      localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
-      return updated;
-    });
+      if (selectedPhotoForLightbox?.id === updatedPhoto.id) {
+        setSelectedPhotoForLightbox({ ...updatedPhoto, image: upload.previewUrl });
+      }
+      savePhotoToCloud(metaOnlyPhoto).catch((err) => {
+        reportSyncError('Lưu thông tin ảnh lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.', err);
+        console.warn('Cloud Firestore photo update error:', err);
+      });
+      enqueuePortfolioPhotoUpload(updatedPhoto, upload, true);
+    } else {
+      setPhotos((prev) => {
+        const updated = prev.map((p) => {
+          if (p.id === updatedPhoto.id) return updatedPhoto;
+          if (updatedPhoto.featured && p.featured) return { ...p, featured: false };
+          return p;
+        });
+        localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
+        return updated;
+      });
 
-    if (selectedPhotoForLightbox?.id === updatedPhoto.id) {
-      setSelectedPhotoForLightbox(updatedPhoto);
+      if (selectedPhotoForLightbox?.id === updatedPhoto.id) {
+        setSelectedPhotoForLightbox(updatedPhoto);
+      }
+
+      savePhotoToCloud(updatedPhoto).catch((err) => {
+        reportSyncError('Lưu ảnh lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.', err);
+        console.warn('Cloud Firestore photo update error:', err);
+      });
     }
-
-    savePhotoToCloud(updatedPhoto).catch((err) => {
-      reportSyncError('Lưu ảnh lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.');
-      console.warn('Cloud Firestore photo update error:', err);
-    });
     if (previouslyFeatured.length > 0) {
       Promise.all(previouslyFeatured.map((p) => updatePhotoInCloud(p.id, { featured: false }))).catch((err) => {
-        reportSyncError('Bỏ ghim ảnh nổi bật cũ trên đám mây thất bại, vui lòng thử lại.');
+        reportSyncError('Bỏ ghim ảnh nổi bật cũ trên đám mây thất bại, vui lòng thử lại.', err);
         console.warn('Cloud Firestore photo unfeature error:', err);
       });
     }
@@ -663,7 +835,24 @@ export default function App() {
   };
 
   const handleConfirmDeletePhoto = (photoId: string) => {
-    const target = photos.find((p) => p.id === photoId);
+    const target = photos.find((p) => p.id === photoId)
+      || pendingPhotos.find((p) => p.id === photoId);
+    // (v7.7) Anh dang dong bo ngam ma bi xoa: huy job, go khoi danh sach
+    // lac quan, thu hoi URL xem truoc local.
+    setPendingPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    setPendingEdits((prev) => {
+      const next = { ...prev };
+      delete next[photoId];
+      return next;
+    });
+    setPhotoSync((prev) => {
+      const next = { ...prev };
+      delete next[photoId];
+      return next;
+    });
+    uploadQueue.remove(`photo-${photoId}`);
+    pendingUploadFiles.current.delete(photoId);
+    if (target?.image?.startsWith('blob:')) URL.revokeObjectURL(target.image);
     setPhotos((prev) => {
       const updated = prev.filter((p) => p.id !== photoId);
       localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
@@ -675,28 +864,38 @@ export default function App() {
     }
 
     deletePhotoFromCloud(photoId).catch((err) => {
-      reportSyncError('Xoá ảnh trên đám mây thất bại, ảnh có thể vẫn còn trên máy khác. Vui lòng thử lại.');
+      reportSyncError('Xoá ảnh trên đám mây thất bại, ảnh có thể vẫn còn trên máy khác. Vui lòng thử lại.', err);
       console.warn('Cloud Firestore photo delete error:', err);
     });
 
     // Xoá luôn file gốc trên Storage (nếu là ảnh đã upload) để khỏi để file mồ côi.
-    if (target?.image) {
+    // URL blob: la anh lac quan chua len Cloud — khong co file de xoa.
+    if (target?.image && target.image.startsWith('http')) {
       deletePhotoFromStorage(target.image).catch((err) =>
         console.warn('Cloud Storage photo file delete warning:', err)
       );
     }
   };
 
-  const handleAddCustomPhoto = (newPhoto: PhotoItem) => {
-    setPhotos((prev) => {
-      const updated = [newPhoto, ...prev];
-      localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
-      return updated;
-    });
-    savePhotoToCloud(newPhoto).catch((err) => {
-      reportSyncError('Lưu ảnh mới lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.');
-      console.warn('Cloud Firestore photo save error:', err);
-    });
+  const handleAddCustomPhoto = (newPhoto: PhotoItem, upload?: PendingPhotoUpload) => {
+    if (upload) {
+      // (v7.7) Them anh tuc thi: anh hien ngay trong Gallery bang URL xem
+      // truoc local, tai len chay ngam trong hang doi. Anh lac quan KHONG
+      // ghi vao localStorage (blob URL chet sau khi tai lai trang).
+      setPendingPhotos((prev) => [newPhoto, ...prev.filter((p) => p.id !== newPhoto.id)]);
+      enqueuePortfolioPhotoUpload(newPhoto, upload, false);
+    } else {
+      // Chi dan URL anh: khong co file de tai, luu thang nhu cu.
+      setPhotos((prev) => {
+        const updated = [newPhoto, ...prev];
+        localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
+        return updated;
+      });
+      savePhotoToCloud(newPhoto).catch((err) => {
+        reportSyncError('Lưu ảnh mới lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.', err);
+        console.warn('Cloud Firestore photo save error:', err);
+      });
+    }
     setSelectedCategory('all');
     setShowingFavoritesOnly(false);
   };
@@ -716,7 +915,7 @@ export default function App() {
     Promise.all(previouslyFeatured.map((p) => updatePhotoInCloud(p.id, { featured: false })))
       .then(() => updatePhotoInCloud(photoId, { featured: true }))
       .catch((err) => {
-        reportSyncError('Đổi ảnh nổi bật trên đám mây thất bại, vui lòng thử lại.');
+        reportSyncError('Đổi ảnh nổi bật trên đám mây thất bại, vui lòng thử lại.', err);
         console.warn('Cloud Firestore photo feature error:', err);
       });
   };
@@ -771,6 +970,13 @@ export default function App() {
         console.warn('Background email send error', e)
       );
     }
+    // (v7.5) Dong bo ban ghi tra cuu cong khai de khach tra duoc moi may.
+    // Chi admin dang nhap moi ghi duoc public_orders (requireAdmin);
+    // khach dat lich khi admin chua dang nhap thi bo qua lang, don van
+    // duoc dong bo khi admin mo Dashboard bam "Dong bo lai tra cuu".
+    savePublicOrder(lead).catch((e) =>
+      console.warn('Background public order sync warning', e)
+    );
   };
 
   const handleUpdateLead = (leadId: string, updates: Partial<BookingLead>) => {
@@ -787,12 +993,18 @@ export default function App() {
       return updated;
     });
     saveBookingLeadToCloud(updatedLead).catch((e) => {
-      reportSyncError('Lưu thay đổi đơn lên đám mây thất bại, vui lòng thử lại.');
+      reportSyncError('Lưu thay đổi đơn lên đám mây thất bại, vui lòng thử lại.', e);
       console.warn('Firestore updateLead error', e);
     });
+    // (v7.5) Don doi (tien da thu / link Drive / trang thai / ghi chu
+    // khong anh huong) -> dong bo lai ban ghi tra cuu cong khai.
+    savePublicOrder(updatedLead).catch((e) =>
+      console.warn('Public order sync warning', e)
+    );
   };
 
   const handleUpdateLeadStatus = (leadId: string, status: BookingStatus) => {
+    const target = leads.find((l) => l.id === leadId);
     setLeads((prev) => {
       const updated = prev.map((l) => (l.id === leadId ? { ...l, status } : l));
       localStorage.setItem('yen_portfolio_leads', JSON.stringify(updated));
@@ -801,6 +1013,12 @@ export default function App() {
     updateLeadStatusInCloud(leadId, status).catch((e) =>
       console.warn('Firestore updateLeadStatus error', e)
     );
+    // (v7.5) Trang thai doi -> dong bo lai ban ghi tra cuu cong khai.
+    if (target) {
+      savePublicOrder({ ...target, status }).catch((e) =>
+        console.warn('Public order sync warning', e)
+      );
+    }
   };
 
   const handleUpdateLeadNotes = (leadId: string, notes: string) => {
@@ -827,6 +1045,10 @@ export default function App() {
     });
     deleteBookingLeadFromCloud(leadId).catch((e) =>
       console.warn('Firestore deleteLead error', e)
+    );
+    // (v7.5) Xoa ca ban ghi tra cuu cong khai cua don nay.
+    deletePublicOrder(leadId).catch((e) =>
+      console.warn('Public order delete warning', e)
     );
   };
 
@@ -870,6 +1092,10 @@ export default function App() {
 
     saveBookingLeadToCloud(lead).catch((e) =>
       console.warn('Firestore manual lead save error', e)
+    );
+    // (v7.5) Don them tay cung dong bo ban ghi tra cuu cong khai.
+    savePublicOrder(lead).catch((e) =>
+      console.warn('Public order sync warning', e)
     );
     saveEmailLogToCloud(emailLog).catch((e) =>
       console.warn('Firestore manual email log save error', e)
@@ -983,6 +1209,7 @@ export default function App() {
             siteContent={siteContent}
             contentUpdatedAt={contentUpdatedAt}
             onSaveSiteContent={handleSaveSiteContent}
+            onSyncPublicOrders={handleSyncPublicOrders}
             onGoogleLogin={async () => {
               try {
                 await loginWithGoogle();
@@ -1054,6 +1281,8 @@ export default function App() {
               isAdmin={userRole === 'admin'}
               onEditPhoto={handleEditPhoto}
               onDeletePhoto={handleRequestDeletePhoto}
+              syncStatusByPhotoId={photoSync}
+              onRetryPhotoSync={handleRetryPhotoSync}
             />
 
             {/* Curated Monographs & Exhibitions Series */}
@@ -1132,6 +1361,9 @@ export default function App() {
         onClose={() => setIsAddPhotoOpen(false)}
         onAddPhoto={handleAddCustomPhoto}
       />
+
+      {/* (v7.7) Chip tien do dong bo nen — hien khi co anh dang tai len ngam. */}
+      <UploadQueueChip />
 
       {/* Client Proofing Portal Modal (v6: theo tung don, khong dung anh mau) */}
       <ClientProofingModal

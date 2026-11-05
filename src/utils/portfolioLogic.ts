@@ -1029,3 +1029,241 @@ export function matchesPhoneSuffix(phone: string, suffix: string): boolean {
   const given = (suffix || '').replace(/[^0-9]/g, '');
   return expected.length === 4 && given === expected;
 }
+
+// --- Tra cuu don moi may (v7.5) ---
+// Collection Firestore `public_orders` (1 doc / 1 ma don, id = lead.id):
+// chi chua truong toi thieu de khach tra cuu (xem buildPublicOrder).
+// KHONG mo doc `booking_leads` cho public (chua email, notes noi bo,
+// cancelReason). Khach tra cuu bang ma don KY-... + SDT (doi chieu bang
+// matchesPublicOrderPhone). Xem services/firebase.ts + firestore.rules.
+
+/** Ban ghi tra cuu cong khai cua 1 don — chi cac truong nay duoc ghi len
+    `public_orders`. Co tinh KHONG co: email, notes, message, cancelReason,
+    groupSize, source, emailSentTo/At. */
+export interface PublicOrder {
+  id: string;
+  clientName: string;
+  /** SDT da chuan hoa (normalizePhone): chi dung de doi chieu khi tra cuu. */
+  phone: string;
+  packageType: BookingInquiry['packageType'];
+  status: BookingStatus;
+  preferredDate: string;
+  timeSlot?: string;
+  estimatedPrice: number;
+  depositAmount: number;
+  paidAmount: number;
+  balance: number;
+  driveLink?: string;
+  updatedAt: string;
+}
+
+/**
+ * Rut gon 1 BookingLead thanh PublicOrder: chi giu truong toi thieu de
+ * tra cuu, SDT chuan hoa, balance tinh lai neu lead chua co.
+ * notes / email / message / cancelReason / groupSize / source / emailSent*
+ * bi loai bo o day — khong bao gio ghi len `public_orders`.
+ */
+export function buildPublicOrder(lead: BookingLead): PublicOrder {
+  return {
+    id: lead.id,
+    clientName: lead.clientName,
+    phone: normalizePhone(lead.phone),
+    packageType: lead.packageType,
+    status: lead.status,
+    preferredDate: lead.preferredDate,
+    timeSlot: lead.timeSlot,
+    estimatedPrice: lead.estimatedPrice || 0,
+    depositAmount: lead.depositAmount || 0,
+    paidAmount: lead.paidAmount || 0,
+    balance:
+      lead.balance ?? Math.max(0, (lead.estimatedPrice || 0) - (lead.paidAmount || 0)),
+    driveLink: lead.driveLink || '',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Doi chieu SDT khi khach tra cuu don cong khai: chuan hoa ca 2 ben
+ * (bo khoang trang/dau, doi dau 84 thanh 0) roi so sanh. SDT rong thi
+ * khong bao gio khop.
+ * matchesPublicOrderPhone('0961230500', '0961 230 500') -> true.
+ */
+export function matchesPublicOrderPhone(storedPhone: string, inputPhone: string): boolean {
+  const stored = normalizePhone(storedPhone);
+  const input = normalizePhone(inputPhone);
+  return stored.length > 0 && input.length > 0 && stored === input;
+}
+
+/**
+ * Validate TONG tien da thu (paidAmount) cua 1 don: so nguyen >= 0 va
+ * <= tong tien don (estimatedPrice). Tra ve thong bao loi tieng Viet,
+ * hop le thi tra null. Dung o Dashboard truoc khi goi onUpdateLead.
+ */
+export function validatePaidAmount(paidAmount: number, estimatedPrice: number): string | null {
+  if (!Number.isInteger(paidAmount) || paidAmount < 0) {
+    return 'Tiền đã thu phải là số nguyên từ 0 VNĐ trở lên.';
+  }
+  if (paidAmount > (estimatedPrice || 0)) {
+    return 'Đã thu không vượt quá tổng tiền đơn';
+  }
+  return null;
+}
+
+// --- Loi luu Cloud (v7.6) ---
+// Banner do truoc day chi hien cau chung chung ("Luu thay doi don len dam
+// may that bai, vui long thu lai.") vi loi that chi nam trong console.
+// handleFirestoreError nem Error(JSON.stringify(errInfo)) nen ma loi
+// (permission-denied...) chi con trong chuoi message — cac ham duoi day
+// trich ma loi tu .code hoac tu message (ke ca dang JSON-stringified hay
+// cau tieng Anh cua Firebase nhu "Missing or insufficient permissions"),
+// roi dich sang huong dan tieng Viet cu the cho Yen.
+
+/** ID database Firestore NAMED ma web dang dung (xem
+    firebase-applet-config.json) — KHONG phai database '(default)'.
+    Rules deploy len (default) se khong ap dung cho web nay. */
+export const FIRESTORE_DATABASE_ID =
+  'ai-studio-ynvisualskyuodip-af887cea-4565-4122-a978-d91796b3a4eb';
+
+const FIRESTORE_ERROR_CODE_PATTERN =
+  /(permission-denied|unauthenticated|unavailable|failed-precondition|not-found|resource-exhausted|deadline-exceeded|invalid-argument|already-exists|aborted|internal|data-loss|cancelled)\b/;
+
+/** Trich ma loi Firestore/Storage tu 1 Error / object co .code / chuoi
+ * message. Khong trich duoc thi tra 'unknown'. */
+export function getFirestoreErrorCode(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && code.length > 0) {
+    if (code.startsWith('storage/')) return code;
+    return code.replace(/^firestore\//, '');
+  }
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const storageMatch = message.match(/storage\/([a-z-]+)/);
+  if (storageMatch) return `storage/${storageMatch[1]}`;
+  const direct = message.match(FIRESTORE_ERROR_CODE_PATTERN);
+  if (direct) return direct[1];
+  // handleFirestoreError nem Error(JSON.stringify(errInfo)): thu doc JSON.
+  try {
+    const parsed = JSON.parse(message) as { code?: unknown; error?: unknown };
+    if (typeof parsed?.code === 'string' && parsed.code.length > 0) {
+      return parsed.code.startsWith('storage/')
+        ? parsed.code
+        : parsed.code.replace(/^firestore\//, '');
+    }
+    if (typeof parsed?.error === 'string') {
+      return getFirestoreErrorCode(new Error(parsed.error));
+    }
+  } catch {
+    // Khong phai JSON — xuong cac mau cau tieng Anh duoi day.
+  }
+  if (/missing or insufficient permissions/i.test(message)) return 'permission-denied';
+  if (/requires authentication|unauthenticated/i.test(message)) return 'unauthenticated';
+  if (/client is offline/i.test(message)) return 'unavailable';
+  return 'unknown';
+}
+
+/** Dich loi Cloud sang huong dan tieng Viet cu the (hien len banner). */
+export function translateCloudError(error: unknown): string {
+  const code = getFirestoreErrorCode(error);
+  switch (code) {
+    case 'permission-denied':
+      return `Quyền bị từ chối (permission-denied): rules chưa được deploy, hoặc deploy nhầm database — mở Firebase Console → Firestore Database → chọn database "${FIRESTORE_DATABASE_ID}" ở ô chọn phía trên tab Rules rồi dán lại firestore.rules.`;
+    case 'unauthenticated':
+      return 'Chưa đăng nhập Google (unauthenticated): đăng nhập lại bằng anhyenk26@gmail.com rồi thử lại.';
+    case 'unavailable':
+      return 'Mất mạng hoặc Cloud chưa phản hồi (unavailable): kiểm tra mạng rồi thử lại.';
+    case 'failed-precondition':
+      return 'Cloud chưa sẵn sàng (failed-precondition): có thể rules hoặc index chưa xong — kiểm tra lại firestore.rules rồi thử lại.';
+    case 'not-found':
+      return 'Không tìm thấy dữ liệu trên Cloud (not-found): đơn này có thể chưa từng được lưu lên Cloud — thử lưu lại sau khi đăng nhập admin.';
+    case 'resource-exhausted':
+      return 'Cloud đã hết hạn mức miễn phí (resource-exhausted): kiểm tra mục Usage trong Firebase Console.';
+    case 'storage/unauthorized':
+      return 'Storage rules chưa deploy (storage/unauthorized) — vào Firebase Console → Storage → Rules, dán storage.rules trong zip rồi Publish.';
+    case 'storage/retry-limit-exceeded':
+      return 'Storage không phản hồi (storage/retry-limit-exceeded): kiểm tra mạng rồi thử lại.';
+    case 'storage/canceled':
+      return 'Tải lên đã bị huỷ (storage/canceled): thử tải lại.';
+    case 'upload-stalled':
+      return 'Không kết nối được tới Storage (kẹt) — thử đổi wifi/4G hoặc tắt VPN rồi thử lại.';
+    default:
+      return `Lỗi Cloud (${code}): vui lòng thử lại, nếu vẫn lỗi thì mở Console (F12) chụp màn hình lỗi gửi cho hỗ trợ.`;
+  }
+}
+
+/** Quyet dinh ghi don bang updateDoc (doc da co) hay setDoc (doc chua co).
+ * Rule booking_leads: create bat buoc qua isValidBookingLead, con update
+ * chi can admin — nen don chi co tren may Yen phai ghi bang update khi doc
+ * da ton tai, tranh bi chan o buoc validate create. */
+export function decideLeadWriteMode(exists: boolean): 'update' | 'create' {
+  return exists ? 'update' : 'create';
+}
+
+/** Loai bo cac key co gia tri undefined khoi object (Firestore nem loi
+ * neu ghi undefined, ke ca setDoc merge hay updateDoc). Giu lai 0, '', false. */
+export function stripUndefinedFields<T extends Record<string, unknown>>(obj: T): T {
+  const out = {} as T;
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+// --- Upload ket o 0% (v7.6) ---
+// Yen dung wifi rat manh ma tai 1 anh van ket o 0% — khong phai do bang
+// thong yeu, ma do phien resumable khong bat dau duoc (khong gui duoc
+// byte nao, cung khong bao loi) nen promise upload khong bao gio settle.
+// Watchdog o services/firebase.ts dung ham duoi day de quyet dinh ket.
+
+/** Thoi gian cho progress event dau tien truoc khi ket luan ket o 0%. */
+export const UPLOAD_FIRST_PROGRESS_TIMEOUT_MS = 20000;
+/** Thoi gian khong tien trien giua chung truoc khi ket luan ket giua chung. */
+export const UPLOAD_STALL_TIMEOUT_MS = 120000;
+
+// --- Tai len tuc thi / dong bo nen (v7.7) ---
+// Yen bam Luu xong la anh hien ngay trong Gallery (optimistic UI), modal
+// dong luon, viec tai len Storage + ghi Firestore chay ngam trong hang doi
+// (services/uploadQueue.ts). Anh chua dong bo xong chi ton tai trong bo
+// nho (URL blob:) — KHONG ghi vao localStorage vi blob URL chet sau khi
+// tai lai trang, va subscription Firestore thay toan bo danh sach anh
+// bang ban Cloud nen anh lac quan phai nam rieng, khong tron vao `photos`.
+
+/** Trang thai dong bo cua 1 anh: dang tai len / loi het 3 lan thu. */
+export type PhotoSyncStatus = 'syncing' | 'error';
+
+/** Du lieu can de tai 1 anh len nen: file goc + blob da nen san (neu co)
+ * + URL xem truoc local de hien ngay trong Gallery. */
+export interface PendingPhotoUpload {
+  file: File;
+  compressedBlob: Blob | null;
+  previewUrl: string;
+}
+
+/** Gop anh Cloud/local (`photos`) voi anh lac quan dang dong bo
+ * (`pendingPhotos`) va ban sua lac quan (`pendingEdits`: photoId -> URL
+ * blob xem truoc). Anh moi len truoc, anh sua hien ban xem truoc moi
+ * nhat; anh goc trong `photos` khong bi sua doi. */
+export function mergeOptimisticPhotos(
+  photos: PhotoItem[],
+  pendingPhotos: PhotoItem[],
+  pendingEdits: Record<string, string>
+): PhotoItem[] {
+  const applyEdit = (p: PhotoItem) => {
+    const preview = pendingEdits[p.id];
+    return preview ? { ...p, image: preview } : p;
+  };
+  const base = photos.map(applyEdit);
+  // Anh moi dang dong bo ma Yen sua ngay (doi file truoc khi len Cloud
+  // xong) thi ban xem truoc moi nhat cung phai ap len anh lac quan do.
+  const pending = pendingPhotos.map(applyEdit);
+  return [...pending, ...base];
+}
+
+/** Quyet dinh upload co dang ket khong: tu lan co tien trien cuoi cung
+ * (lastProgressAt) den hien tai (now) ma qua timeoutMs thi ket.
+ * isUploadStalled(0, 20001) -> true; isUploadStalled(0, 20000) -> false. */
+export function isUploadStalled(
+  lastProgressAt: number,
+  now: number,
+  timeoutMs: number = UPLOAD_FIRST_PROGRESS_TIMEOUT_MS
+): boolean {
+  return now - lastProgressAt > timeoutMs;
+}

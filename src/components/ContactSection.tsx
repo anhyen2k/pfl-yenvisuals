@@ -14,7 +14,11 @@ import {
   getPackageDetails,
   formatVND,
   normalizePhone,
+  normalizeProofingCode,
+  matchesPublicOrderPhone,
+  type PublicOrder,
 } from '../utils/portfolioLogic';
+import { fetchPublicOrder } from '../services/firebase';
 
 interface ContactSectionProps {
   onOpenBooking: () => void;
@@ -29,23 +33,49 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, o
   const c = content ?? DEFAULT_SITE_CONTENT;
   const [lookupCode, setLookupCode] = useState('');
   const [lookupPhone, setLookupPhone] = useState('');
-  const [lookupResult, setLookupResult] = useState<BookingLead | null>(null);
+  // Ket qua co the la don cuc bo (BookingLead) hoac ban ghi tra cuu cong
+  // khai (PublicOrder) — ca 2 deu co du truong de hien (ten, goi, ngay,
+  // tien coc / da thu / con lai, link Drive), khong co email / ghi chu.
+  const [lookupResult, setLookupResult] = useState<BookingLead | PublicOrder | null>(null);
   const [lookupDone, setLookupDone] = useState(false);
+  const [lookupLoading, setLookupLoading] = useState(false);
 
-  const handleLookup = (e: React.FormEvent) => {
+  // (v7.5) Tra cuu moi may: tim trong leads cuc bo truoc (don dat tren
+  // may nay / admin dang nhap co cloud sync); khong thay thi thu doc
+  // 1 doc public_orders theo ma, doi chieu SDT. Khong khop hoac khong
+  // co doc thi bao chung 1 cau — khong tiet lo don co ton tai hay khong.
+  const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = lookupCode.trim().toLowerCase();
+    const code = normalizeProofingCode(lookupCode);
     const phone = normalizePhone(lookupPhone);
-    const found =
-      code && phone
-        ? leads.find(
-            (lead) =>
-              lead.id.trim().toLowerCase() === code &&
-              normalizePhone(lead.phone) === phone
-          )
-        : undefined;
-    setLookupResult(found ?? null);
-    setLookupDone(true);
+    setLookupLoading(true);
+    try {
+      const foundLocal =
+        code && phone
+          ? leads.find(
+              (lead) =>
+                normalizeProofingCode(lead.id) === code &&
+                normalizePhone(lead.phone) === phone
+            )
+          : undefined;
+      if (foundLocal) {
+        setLookupResult(foundLocal);
+        setLookupDone(true);
+        return;
+      }
+      if (code && phone) {
+        const pub = await fetchPublicOrder(code).catch(() => null);
+        if (pub && matchesPublicOrderPhone(pub.phone, phone)) {
+          setLookupResult(pub);
+          setLookupDone(true);
+          return;
+        }
+      }
+      setLookupResult(null);
+      setLookupDone(true);
+    } finally {
+      setLookupLoading(false);
+    }
   };
 
   const lookupStatus = lookupResult ? formatStatusLabel(lookupResult.status) : null;
@@ -118,17 +148,18 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, o
             />
             <button
               type="submit"
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-neutral-900 hover:bg-neutral-800 dark:text-neutral-900 dark:bg-white dark:hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+              disabled={lookupLoading}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-neutral-900 hover:bg-neutral-800 dark:text-neutral-900 dark:bg-white dark:hover:bg-neutral-100 rounded-md transition-colors cursor-pointer disabled:opacity-60"
             >
               <Search className="w-3.5 h-3.5" />
-              <span>Tra cứu</span>
+              <span>{lookupLoading ? 'Đang tra cứu...' : 'Tra cứu'}</span>
             </button>
           </form>
 
           {lookupDone && !lookupResult && (
             <p className="mt-4 text-sm text-rose-600 dark:text-rose-400">
-              Không tìm thấy đơn, kiểm tra lại mã và SĐT. Lưu ý: chỉ tra được đơn đặt
-              trên thiết bị/trình duyệt này; nếu bạn đặt lịch ở máy khác, nhắn Zalo{' '}
+              Không tìm thấy đơn, kiểm tra lại mã và SĐT. Tra cứu được trên mọi
+              máy khi Anh Yên đã đồng bộ đơn; nếu vẫn không thấy, nhắn Zalo{' '}
               {SITE_CONFIG.phoneDisplay} để Anh Yên kiểm tra giúp.
             </p>
           )}
@@ -172,21 +203,28 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, o
                   <div className="font-semibold text-neutral-900 dark:text-white mt-0.5">{formatVND(lookupResult.balance ?? 0)}</div>
                 </div>
               </div>
-              <p className="text-neutral-700 dark:text-neutral-300 pt-1">
-                <span className="font-medium text-neutral-900 dark:text-white">Link ảnh: </span>
-                {lookupResult.driveLink ? (
+              {/* (v7.5) Link Drive: nut to mau amber khi co link, chua co thi bao ro */}
+              {lookupResult.driveLink ? (
+                <div className="pt-2 space-y-1.5">
                   <a
                     href={lookupResult.driveLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-amber-700 dark:text-amber-400 underline break-all"
+                    className="flex items-center justify-center gap-2 w-full px-4 py-3 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors"
                   >
-                    Xem ảnh trên Google Drive
+                    <span>Xem ảnh của bạn trên Google Drive</span>
+                    <ArrowRight className="w-4 h-4" />
                   </a>
-                ) : (
-                  'Chưa có link ảnh, Anh Yên sẽ gửi sau khi trả ảnh'
-                )}
-              </p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    Link chỉ xuất hiện sau khi Anh Yên dán link Drive cho đơn này trong Dashboard.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-neutral-700 dark:text-neutral-300 pt-1">
+                  <span className="font-medium text-neutral-900 dark:text-white">Link ảnh: </span>
+                  Chưa có link ảnh — Anh Yên sẽ gửi sau khi trả ảnh xong.
+                </p>
+              )}
             </div>
           )}
         </div>

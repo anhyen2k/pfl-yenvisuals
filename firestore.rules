@@ -123,6 +123,39 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    function isValidPublicOrder(data, orderId) {
+      return data.keys().hasAll(['id', 'clientName', 'phone', 'packageType', 'status', 'preferredDate', 'estimatedPrice', 'depositAmount', 'paidAmount', 'balance'])
+        && data.id == orderId
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 200
+        && data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 30
+        && data.packageType is string && data.packageType.size() <= 64
+        && data.status in ['new', 'consulting', 'deposited', 'completed', 'cancelled']
+        && data.preferredDate is string && data.preferredDate.size() <= 30
+        && data.estimatedPrice is number && data.estimatedPrice >= 0
+        && data.depositAmount is number && data.depositAmount >= 0
+        && data.paidAmount is number && data.paidAmount >= 0
+        && data.balance is number && data.balance >= 0
+        && (!('timeSlot' in data) || (data.timeSlot is string && data.timeSlot.size() <= 64))
+        && (!('driveLink' in data) || (data.driveLink is string && data.driveLink.size() <= 2000))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        // Cam ghi cac truong nhay cam len ban ghi tra cuu cong khai:
+        // email, ghi chu noi bo, ly do huy, loi nhan concept.
+        && !('email' in data) && !('notes' in data) && !('message' in data)
+        && !('cancelReason' in data) && !('emailSentTo' in data) && !('emailSentAt' in data);
+    }
+
+    // Tra cuu don moi may (v7.5): public CHI DUOC get 1 doc theo ma don
+    // minh nhap (KHONG list — khong liet ke duoc don cua nguoi khac);
+    // SDT doi chieu o phia client (matchesPublicOrderPhone). Ghi/xoa
+    // CHI ADMIN, du lieu phai dung dinh dang + id == id doc.
+    // PHAI deploy lai firestore.rules thi tra cuu moi may moi chay.
+    match /public_orders/{orderId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidId(orderId) && isValidPublicOrder(incoming(), orderId);
+      allow delete: if isAdmin();
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

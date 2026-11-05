@@ -22,6 +22,12 @@ service firebase.storage {
       allow write: if isAdmin() && request.resource.size < 8 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
+    // (v7.6) File test chan doan (Dashboard > Cai dat > Kiem tra ket noi
+    // Cloud): chi admin ghi/xoa, khong ai doc — file test duoc xoa ngay
+    // sau khi up xong. Khong co rule nay thi test Storage bao loi quyen.
+    match /diagnostics/{fileName} {
+      allow read, write: if isAdmin();
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }

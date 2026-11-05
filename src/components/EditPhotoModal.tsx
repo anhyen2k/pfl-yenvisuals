@@ -17,15 +17,19 @@ import {
   Check,
   Upload,
 } from 'lucide-react';
-import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, CATEGORY_LABELS, type PendingPhotoUpload } from '../utils/portfolioLogic';
 import { PHOTO_SERIES } from '../data/portfolioData';
-import { compressImageFile, uploadCompressedPhoto } from '../services/firebase';
+import { compressImageFile } from '../services/firebase';
 
 interface EditPhotoModalProps {
   isOpen: boolean;
   photo: PhotoItem | null;
   onClose: () => void;
-  onSave: (updatedPhoto: PhotoItem) => void;
+  /** (v7.7) Sua anh cung tuc thi nhu them anh: doi file moi thi anh hien
+   *  ngay ban xem truoc local, tai len chay ngam trong hang doi (`upload`
+   *  kem file + blob da nen + URL xem truoc). Chi sua thong tin (khong doi
+   *  file) thi luu thang nhu cu. */
+  onSave: (updatedPhoto: PhotoItem, upload?: PendingPhotoUpload) => void;
 }
 
 export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
@@ -35,14 +39,12 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
   onSave,
 }) => {
   const [formData, setFormData] = useState<PhotoItem | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const [tagsInput, setTagsInput] = useState('');
   // File moi nguoi dung chon de thay anh: nen ngay khi chon (khong doi den
   // luc bam Luu), chi upload blob da nen khi submit.
   const [newFile, setNewFile] = useState<File | null>(null);
   const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('');
   const [newPreview, setNewPreview] = useState('');
   const previewUrlRef = useRef('');
   const [error, setError] = useState('');
@@ -62,7 +64,6 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
       setNewFile(null);
       setCompressedBlob(null);
       setIsCompressing(false);
-      setSaveStatus('');
       setNewPreview('');
       setError('');
       setImageBroken(false);
@@ -146,38 +147,23 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
     setNewPreview('');
   };
 
-  const handleSubmit = async (e: React.FormEvent | React.MouseEvent) => {
+  // (v7.7) Luu TUC THI: dong modal ngay, khong cho upload xong nhu truoc.
+  // Doi file moi thi anh hien ngay ban xem truoc local (App overlay len
+  // anh cu), tai len chay ngam trong hang doi; chi sua thong tin thi luu
+  // thang nhu cu. Bam Luu ca khi dang nen (hang doi se tu nen lai).
+  const handleSubmit = (e: React.FormEvent | React.MouseEvent) => {
     e.preventDefault();
-    if (!formData || isCompressing) return;
-    setIsSaving(true);
-    setError('');
-    try {
-      let updatedPhoto = formData;
-      if (newFile) {
-        // Blob da nen san tu luc chon file: chi con upload + lay downloadURL.
-        let downloadURL: string;
-        try {
-          setSaveStatus('Đang tải lên 0%...');
-          downloadURL = await uploadCompressedPhoto(compressedBlob ?? newFile, formData.id, (pct) => {
-            setSaveStatus(`Đang tải lên ${pct}%...`);
-          });
-        } catch (err) {
-          const detail = err instanceof Error ? err.message : String(err);
-          setError(
-            `Tải ảnh lên Storage thất bại: ${detail} Vui lòng kiểm tra Storage rules đã deploy chưa rồi thử lại.`
-          );
-          setIsSaving(false);
-          return;
-        }
-        setSaveStatus('Đang lưu thông tin...');
-        updatedPhoto = { ...formData, image: downloadURL };
-      }
-      onSave(updatedPhoto);
-      onClose();
-    } finally {
-      setIsSaving(false);
-      setSaveStatus('');
+    if (!formData) return;
+    let updatedPhoto = formData;
+    let upload: PendingPhotoUpload | undefined;
+    if (newFile && newPreview) {
+      updatedPhoto = { ...formData, image: newPreview };
+      upload = { file: newFile, compressedBlob, previewUrl: newPreview };
+      // Giao URL xem truoc cho App — go ref de unmount khong thu hoi.
+      previewUrlRef.current = '';
     }
+    onSave(updatedPhoto, upload);
+    onClose();
   };
 
   return (
@@ -593,12 +579,12 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSaving || isCompressing}
+
             className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             <span>
-              {isCompressing ? 'Đang nén ảnh...' : isSaving ? saveStatus || 'Đang lưu...' : 'Lưu Thay Đổi Lên Đám Mây'}
+              {isCompressing ? 'Đang nén ảnh… (vẫn lưu được ngay)' : 'Lưu Thay Đổi'}
             </span>
           </button>
         </div>

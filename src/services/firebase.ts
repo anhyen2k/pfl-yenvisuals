@@ -26,12 +26,24 @@ import {
 import {
   getStorage,
   ref,
+  uploadBytes,
   uploadBytesResumable,
   getDownloadURL,
   deleteObject,
+  type StorageReference,
 } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { validatePackagePrices, isAdminEmail } from '../utils/portfolioLogic';
+import {
+  decideLeadWriteMode,
+  getFirestoreErrorCode,
+  isUploadStalled,
+  stripUndefinedFields,
+  translateCloudError,
+  FIRESTORE_DATABASE_ID,
+  UPLOAD_FIRST_PROGRESS_TIMEOUT_MS,
+  UPLOAD_STALL_TIMEOUT_MS,
+} from '../utils/portfolioLogic';
 import {
   DEFAULT_SITE_CONTENT,
   mergeSiteContent,
@@ -46,8 +58,9 @@ import type {
   PhotoItem,
   ProofingPhoto,
   ProofingSelection,
+  PublicOrder,
 } from '../utils/portfolioLogic';
-import { PROOFING_QUERY_LIMIT } from '../utils/portfolioLogic';
+import { PROOFING_QUERY_LIMIT, buildPublicOrder } from '../utils/portfolioLogic';
 
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
@@ -61,6 +74,11 @@ export const storage = getStorage(app);
 
 export const MAX_PHOTO_DIMENSION = 1600;
 export const PHOTO_JPEG_QUALITY = 0.82;
+/** (v7.7) Anh proofing chi de khach chon anh: 1400px JPEG 0.78, nhe hon
+ * ~30% so voi 1600px 0.82 ma van du net de chon. Anh portfolio GIU
+ * NGUYEN 1600px 0.82, khong doi. */
+export const PROOFING_MAX_DIMENSION = 1400;
+export const PROOFING_JPEG_QUALITY = 0.78;
 // File goc da nho thi khong nen lai: upload thang, vua nhanh vua giu chat luong goc.
 export const SKIP_COMPRESS_MAX_BYTES = 600 * 1024;
 
@@ -121,29 +139,98 @@ export async function makeThumbnailBlob(file: File | Blob): Promise<Blob | null>
 /**
  * Upload 1 blob len 1 duong dan Storage tuy y, co tien do % + cache 1 nam.
  * Dung chung cho anh goc + thumbnail (portfolio + proofing).
+ * (v7.6) Watchdog chong ket o 0%: phien resumable co khi khong nhan duoc
+ * progress event nao cung khong bao loi (wifi manh van ket) nen promise
+ * khong bao gio settle. Neu qua 20s chua co progress event nao, hoac qua
+ * 120s khong tien trien giua chung, thi huy phien va thu lai 1 lan bang
+ * uploadBytes (PUT 1 lan duy nhat — duong resumable bi chan thi PUT
+ * thuong co the qua duoc). Van loi thi nem loi that cho modal hien.
  */
+const UPLOAD_STALL_ERROR_CODE = 'upload-stalled';
+
+function isStalledUploadError(error: unknown): boolean {
+  return error instanceof Error && (error as { code?: unknown }).code === UPLOAD_STALL_ERROR_CODE;
+}
+
+function stalledUploadError(receivedProgress: boolean): Error {
+  const err = new Error(
+    receivedProgress
+      ? 'Tải lên bị kẹt quá 120 giây không tiến triển (kẹt giữa chừng). Kiểm tra mạng rồi thử lại.'
+      : 'Không kết nối được tới Firebase Storage trong 20 giây (kẹt ở 0%). Kiểm tra mạng, thử lại, hoặc kiểm tra Storage rules đã deploy chưa.'
+  );
+  (err as { code?: string }).code = UPLOAD_STALL_ERROR_CODE;
+  return err;
+}
+
+function runResumableUpload(
+  storageRef: StorageReference,
+  blob: Blob,
+  metadata: { contentType: string; cacheControl: string },
+  onProgress?: (percent: number) => void
+): Promise<void> {
+  const task = uploadBytesResumable(storageRef, blob, metadata);
+  const startedAt = Date.now();
+  let lastProgressAt = startedAt;
+  let receivedProgress = false;
+  let settled = false;
+  return new Promise<void>((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (settled) return;
+      const timeoutMs = receivedProgress
+        ? UPLOAD_STALL_TIMEOUT_MS
+        : UPLOAD_FIRST_PROGRESS_TIMEOUT_MS;
+      if (isUploadStalled(lastProgressAt, Date.now(), timeoutMs)) {
+        settled = true;
+        clearInterval(timer);
+        task.cancel();
+        reject(stalledUploadError(receivedProgress));
+      }
+    }, 1000);
+    task.on(
+      'state_changed',
+      (snapshot) => {
+        lastProgressAt = Date.now();
+        receivedProgress = true;
+        if (onProgress && snapshot.totalBytes > 0) {
+          onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+        }
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        reject(err);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        resolve();
+      }
+    );
+  });
+}
+
 export async function uploadBlobToStorage(
   blob: Blob,
   storagePath: string,
   onProgress?: (percent: number) => void
 ): Promise<string> {
   const storageRef = ref(storage, storagePath);
-  const task = uploadBytesResumable(storageRef, blob, {
+  const metadata = {
     contentType: blob.type || 'image/jpeg',
     cacheControl: STORAGE_CACHE_CONTROL,
-  });
-  await new Promise<void>((resolve, reject) => {
-    task.on(
-      'state_changed',
-      (snapshot) => {
-        if (onProgress && snapshot.totalBytes > 0) {
-          onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-        }
-      },
-      (err) => reject(err),
-      () => resolve()
-    );
-  });
+  };
+  try {
+    await runResumableUpload(storageRef, blob, metadata, onProgress);
+  } catch (err) {
+    if (isStalledUploadError(err)) {
+      // Thu lai 1 lan bang PUT 1 lan duy nhat; van loi thi nem loi that.
+      await uploadBytes(storageRef, blob, metadata);
+    } else {
+      throw err;
+    }
+  }
   return getDownloadURL(storageRef);
 }
 
@@ -158,7 +245,8 @@ function canvasToBlob(
 async function bitmapToJpeg(
   bitmap: ImageBitmap,
   width: number,
-  height: number
+  height: number,
+  quality: number = PHOTO_JPEG_QUALITY
 ): Promise<Blob | null> {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(width));
@@ -166,7 +254,12 @@ async function bitmapToJpeg(
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvasToBlob(canvas);
+  return canvasToBlob(canvas, 'image/jpeg', quality);
+}
+
+export interface CompressOptions {
+  maxDimension?: number;
+  quality?: number;
 }
 
 /**
@@ -177,18 +270,24 @@ async function bitmapToJpeg(
  *   drawImage 1 lan tu 6000px xuong 1600px bi cham / mo.
  * - Trinh duyet khong ho tro resizeWidth thi fallback canvas nhu cu.
  * Tra ve Blob da nen (hoac chinh file goc neu khong can nen / nen loi).
+ * (v7.7) `options` cho phep nen nhe hon cho anh proofing (1400px 0.78).
  */
-export async function compressImageFile(file: File | Blob): Promise<Blob> {
+export async function compressImageFile(
+  file: File | Blob,
+  options?: CompressOptions
+): Promise<Blob> {
+  const maxDimension = options?.maxDimension ?? MAX_PHOTO_DIMENSION;
+  const quality = options?.quality ?? PHOTO_JPEG_QUALITY;
   const bitmap = await createImageBitmap(file).catch(() => null);
   if (!bitmap) return file;
   // Khai bao ngoai try de finally dong duoc ca bitmap goc va anh da ha bac.
   let source: ImageBitmap = bitmap;
   try {
     const { width, height } = bitmap;
-    if (width <= MAX_PHOTO_DIMENSION && height <= MAX_PHOTO_DIMENSION && file.size <= SKIP_COMPRESS_MAX_BYTES) {
+    if (width <= maxDimension && height <= maxDimension && file.size <= SKIP_COMPRESS_MAX_BYTES) {
       return file;
     }
-    const scale = Math.min(1, MAX_PHOTO_DIMENSION / Math.max(width, height));
+    const scale = Math.min(1, maxDimension / Math.max(width, height));
     const targetW = Math.max(1, Math.round(width * scale));
     const targetH = Math.max(1, Math.round(height * scale));
 
@@ -217,7 +316,7 @@ export async function compressImageFile(file: File | Blob): Promise<Blob> {
         // Anh da dung kich thuoc dich: chuyen sang JPEG qua canvas nho
         // (khong ve lai, chi doi dinh dang) — canvas 1600px nay re hon
         // nhieu so voi ve tu anh goc 6000px.
-        const out = await bitmapToJpeg(resized, targetW, targetH);
+        const out = await bitmapToJpeg(resized, targetW, targetH, quality);
         resized.close();
         if (out) return out;
       }
@@ -227,14 +326,14 @@ export async function compressImageFile(file: File | Blob): Promise<Blob> {
         resizeHeight: targetH,
       }).catch(() => null);
       if (resized) {
-        const out = await bitmapToJpeg(resized, targetW, targetH);
+        const out = await bitmapToJpeg(resized, targetW, targetH, quality);
         resized.close();
         if (out) return out;
       }
     }
 
     // Fallback: canvas drawImage tu source (anh goc hoac anh da ha bac).
-    const out = await bitmapToJpeg(source, targetW, targetH);
+    const out = await bitmapToJpeg(source, targetW, targetH, quality);
     if (out) return out;
     return file;
   } finally {
@@ -265,6 +364,9 @@ export async function uploadCompressedPhoto(
  * thumb ~600px WebP. Tra ve { url, thumbUrl } — thumb tao loi thi
  * thumbUrl = url (fallback, Gallery van hien anh goc).
  * Luu thumbUrl vao doc portfolio_photos de Gallery load thumb truoc.
+ * (v7.7) Thumbnail lam tu blob DA NEN (1600px) thay vi giai nen lai
+ * file goc 6000px; anh lon + thumb tai SONG SONG (Promise.all) thay
+ * vi noi tiep — tien do = 80% anh lon + 20% thumb.
  */
 export async function uploadPhotoWithThumbnail(
   file: File,
@@ -275,24 +377,37 @@ export async function uploadPhotoWithThumbnail(
 ): Promise<{ url: string; thumbUrl: string }> {
   requireAdmin();
   const compressed = precompressed ?? (await compressImageFile(file));
-  const url = await uploadCompressedPhoto(compressed, photoId, (pct) =>
-    onProgress?.(Math.round(pct * 0.8))
-  );
-  let thumbUrl = url;
-  try {
-    const thumbBlob = await makeThumbnailBlob(file);
-    if (thumbBlob) {
-      thumbUrl = await uploadBlobToStorage(
+  let mainPct = 0;
+  let thumbPct = 0;
+  const reportProgress = () => {
+    onProgress?.(Math.round(mainPct * 0.8 + thumbPct * 0.2));
+  };
+  const uploadMain = uploadCompressedPhoto(compressed, photoId, (pct) => {
+    mainPct = pct;
+    reportProgress();
+  });
+  const uploadThumb = (async () => {
+    try {
+      // (v7.7) Lam thumb tu blob da nen — re hon nhieu so voi giai nen
+      // lai file goc; thumb loi thi dung anh goc thay the.
+      const thumbBlob = await makeThumbnailBlob(compressed);
+      if (!thumbBlob) return null;
+      return await uploadBlobToStorage(
         thumbBlob,
         `portfolio_photos/${photoId}_thumb.webp`,
-        (pct) => onProgress?.(80 + Math.round(pct * 0.2))
+        (pct) => {
+          thumbPct = pct;
+          reportProgress();
+        }
       );
+    } catch (err) {
+      console.warn('Thumbnail upload warning (dung anh goc thay the):', err);
+      return null;
     }
-  } catch (err) {
-    console.warn('Thumbnail upload warning (dung anh goc thay the):', err);
-  }
+  })();
+  const [url, thumbUrl] = await Promise.all([uploadMain, uploadThumb]);
   onProgress?.(100);
-  return { url, thumbUrl };
+  return { url, thumbUrl: thumbUrl ?? url };
 }
 
 /**
@@ -350,8 +465,12 @@ export function handleFirestoreError(
   operationType: OperationType,
   path: string | null
 ) {
-  const errInfo: FirestoreErrorInfo = {
+  // (v7.6) Giu lai ma loi (permission-denied...) trong errInfo de banner
+  // hien duoc ly do that — truoc day chi co message tieng Anh chung chung
+  // ("Missing or insufficient permissions") nen khong dich duoc.
+  const errInfo: FirestoreErrorInfo & { code: string } = {
     error: error instanceof Error ? error.message : String(error),
+    code: getFirestoreErrorCode(error),
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -385,14 +504,108 @@ testFirestoreConnection();
 
 /**
  * Saves a new booking lead permanently to Cloud Firestore
+ * (v7.6) Don chi co tren may Yen (chua tung len Cloud) ma ghi bang setDoc
+ * merge se bi rule tinh la CREATE va phai qua validate isValidBookingLead
+ * (vd email trong / groupSize sai kieu la bi chan). Kiem tra doc da ton
+ * tai chua: co roi thi updateDoc (rule update chi can admin), chua co thi
+ * setDoc nhu cu. Loai bo field undefined truoc khi ghi (Firestore nem
+ * loi ca o setDoc merge lan updateDoc neu gap undefined).
  */
 export async function saveBookingLeadToCloud(lead: BookingLead): Promise<void> {
   const path = 'booking_leads';
+  const ref = doc(db, path, lead.id);
   try {
-    await setDoc(doc(db, path, lead.id), lead, { merge: true });
+    const snap = await getDoc(ref);
+    const data = stripUndefinedFields(lead as unknown as Record<string, unknown>);
+    if (decideLeadWriteMode(snap.exists()) === 'update') {
+      await updateDoc(ref, data);
+    } else {
+      await setDoc(ref, data, { merge: true });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${path}/${lead.id}`);
   }
+}
+
+/**
+ * (v7.6) Tu chan doan ket noi Cloud cho Dashboard (tab Cai dat): kiem tra
+ * da dang nhap Google chua, roi test that ca Firestore lan Storage.
+ * KHONG ghi du lieu that len Cloud khi kiem tra — file test Storage duoc
+ * xoa ngay sau khi up. Tra ve ket qua rieng tung muc de Yen biet dung
+ * cho nao hong (rules Firestore hay rules Storage).
+ */
+export interface CloudDiagnosis {
+  ok: boolean;
+  firestore: string;
+  storage: string;
+}
+
+/** Cho 1 promise chay toi da ms — qua han thi reject voi ma code cho truoc. */
+function withTimeout<T>(promise: Promise<T>, ms: number, code: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`Timed out after ${ms}ms`);
+      (err as { code?: string }).code = code;
+      reject(err);
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+/** Test Storage that: up 1 blob nho (1KB text) len duong dan tam
+ * `diagnostics/test-<timestamp>.txt` roi xoa ngay. Can rule
+ * `diagnostics/{fileName}` trong storage.rules (chi admin ghi/xoa). */
+async function testStorageConnection(): Promise<{ ok: boolean; message: string }> {
+  const testRef = ref(storage, `diagnostics/test-${Date.now()}.txt`);
+  const blob = new Blob(['yen-photo-test'], { type: 'text/plain' });
+  try {
+    await withTimeout(uploadBytes(testRef, blob), 15000, UPLOAD_STALL_ERROR_CODE);
+    try {
+      await deleteObject(testRef);
+    } catch {
+      // Bo qua loi xoa file test — up duoc la da du ket luan Storage OK.
+    }
+    return { ok: true, message: 'Storage: OK — tải thử 1KB và xoá file test thành công.' };
+  } catch (error) {
+    if (isStalledUploadError(error)) {
+      return {
+        ok: false,
+        message:
+          'Storage: Lỗi (kẹt) — Không kết nối được tới Storage trong 15 giây. Thử đổi wifi/4G hoặc tắt VPN rồi kiểm tra lại.',
+      };
+    }
+    return { ok: false, message: `Storage: Lỗi — ${translateCloudError(error)}` };
+  }
+}
+
+export async function diagnoseCloudConnection(): Promise<CloudDiagnosis> {
+  const user = auth.currentUser;
+  if (!user) {
+    const msg =
+      'Chưa đăng nhập Google (unauthenticated): đăng nhập lại bằng anhyenk26@gmail.com rồi thử lại.';
+    return { ok: false, firestore: `Firestore: Lỗi — ${msg}`, storage: `Storage: Lỗi — ${msg}` };
+  }
+  let firestore: { ok: boolean; message: string };
+  try {
+    await getDocFromServer(doc(db, 'settings', 'pricing'));
+    firestore = {
+      ok: true,
+      message: `Firestore: OK — đã đăng nhập: ${user.email || '(không rõ email)'}, đọc được settings/pricing từ database ${FIRESTORE_DATABASE_ID}.`,
+    };
+  } catch (error) {
+    firestore = { ok: false, message: `Firestore: Lỗi — ${translateCloudError(error)}` };
+  }
+  const storage = await testStorageConnection();
+  return { ok: firestore.ok && storage.ok, firestore: firestore.message, storage: storage.message };
 }
 
 export { onAuthStateChanged, type User };
@@ -882,43 +1095,70 @@ export async function saveProofingPhotoToCloud(photo: ProofingPhoto): Promise<vo
 }
 
 /**
- * (v6) Upload 1 anh proofing cho 1 don: nen ve 1600px JPEG 0.82 + thumb
+ * (v6) Upload 1 anh proofing cho 1 don: nen ve 1400px JPEG 0.78 + thumb
  * ~600px WebP, up len Storage `proofing/<LEADID>/<photoId>.jpg` (+ thumb
  * `_thumb.webp`), cache 1 nam, ghi doc Firestore kem phoneSuffix.
  * Tra ve ProofingPhoto da luu. Chi admin duoc goi.
+ * (v7.7) Nhan them blob da nen san tu luc chon file (ProofingManager nen
+ * truoc, song song toi da 4 file); thumb lam tu blob da nen; anh lon +
+ * thumb tai SONG SONG (Promise.all) — tien do = 80% anh lon + 20% thumb.
  */
 export async function uploadProofingPhoto(
   file: File,
   leadId: string,
   phoneSuffix: string,
   order: number,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  /** Blob da nen san tu luc chon file (ProofingManager); co thi khong nen lai. */
+  precompressed?: Blob | null
 ): Promise<ProofingPhoto> {
   requireAdmin();
   const code = (leadId || '').trim().toUpperCase();
   const photoId = `proof-${code}-${Date.now()}-${Math.floor(10 + Math.random() * 90)}`;
-  const compressed = await compressImageFile(file);
+  const compressed =
+    precompressed ??
+    (await compressImageFile(file, {
+      maxDimension: PROOFING_MAX_DIMENSION,
+      quality: PROOFING_JPEG_QUALITY,
+    }));
   const ext = compressed.type === 'image/png' ? 'png' : 'jpg';
-  const url = await uploadBlobToStorage(compressed, `proofing/${code}/${photoId}.${ext}`, (pct) =>
-    onProgress?.(Math.round(pct * 0.8))
-  );
-  let thumbUrl = url;
-  try {
-    const thumbBlob = await makeThumbnailBlob(file);
-    if (thumbBlob) {
-      thumbUrl = await uploadBlobToStorage(thumbBlob, `proofing/${code}/${photoId}_thumb.webp`, (pct) =>
-        onProgress?.(80 + Math.round(pct * 0.2))
-      );
+  let mainPct = 0;
+  let thumbPct = 0;
+  const reportProgress = () => {
+    onProgress?.(Math.round(mainPct * 0.8 + thumbPct * 0.2));
+  };
+  const uploadMain = uploadBlobToStorage(
+    compressed,
+    `proofing/${code}/${photoId}.${ext}`,
+    (pct) => {
+      mainPct = pct;
+      reportProgress();
     }
-  } catch (err) {
-    console.warn('Proofing thumbnail upload warning (dung anh goc thay the):', err);
-  }
+  );
+  const uploadThumb = (async () => {
+    try {
+      const thumbBlob = await makeThumbnailBlob(compressed);
+      if (!thumbBlob) return null;
+      return await uploadBlobToStorage(
+        thumbBlob,
+        `proofing/${code}/${photoId}_thumb.webp`,
+        (pct) => {
+          thumbPct = pct;
+          reportProgress();
+        }
+      );
+    } catch (err) {
+      console.warn('Proofing thumbnail upload warning (dung anh goc thay the):', err);
+      return null;
+    }
+  })();
+  const [url, thumbUrl] = await Promise.all([uploadMain, uploadThumb]);
   onProgress?.(100);
   const photo: ProofingPhoto = {
     id: photoId,
     leadId: code,
     url,
-    thumbUrl,
+    thumbUrl: thumbUrl ?? url,
     order,
     phoneSuffix: (phoneSuffix || '').replace(/[^0-9]/g, '').slice(-4),
     createdAt: new Date().toISOString(),
@@ -980,4 +1220,79 @@ export async function saveProofingSelection(selection: ProofingSelection): Promi
     },
     { merge: true }
   );
+}
+
+// --- Tra cuu don moi may (v7.5) ---
+// Collection `public_orders` (1 doc / 1 ma don, id = lead.id): chi chua
+// truong toi thieu de tra cuu (xem buildPublicOrder — KHONG co email,
+// notes, message, cancelReason). Rules (firestore.rules):
+// - public: chi get 1 doc theo ma (KHONG list) + doi chieu SDT o client;
+// - create/update/delete: CHI ADMIN.
+// Ghi: App goi savePublicOrder moi khi don duoc tao/cap nhat; doc:
+// ContactSection goi fetchPublicOrder khi khong tim thay don trong leads
+// cuc bo. PHAI deploy lai firestore.rules thi tra cuu moi may moi chay.
+
+/**
+ * Ghi / cap nhat ban ghi tra cuu cong khai cua 1 don (chi admin).
+ * Dung setDoc merge, doc id = ma don (vd KY-12345).
+ */
+export async function savePublicOrder(lead: BookingLead): Promise<void> {
+  requireAdmin();
+  const order = buildPublicOrder(lead);
+  await setDoc(doc(db, 'public_orders', order.id), order, { merge: true });
+}
+
+/** Xoa ban ghi tra cuu cong khai khi xoa don (chi admin). */
+export async function deletePublicOrder(leadId: string): Promise<void> {
+  requireAdmin();
+  await deleteDoc(doc(db, 'public_orders', (leadId || '').trim().toUpperCase()));
+}
+
+/**
+ * Doc 1 ban ghi tra cuu theo ma don (public get — khach khong dang nhap
+ * van doc duoc 1 doc khi biet ma; KHONG list duoc). Tra ve null neu doc
+ * khong ton tai. Ben goi PHAI doi chieu SDT bang matchesPublicOrderPhone
+ * truoc khi hien ket qua — khong hien gi chi vi doc ton tai.
+ */
+export async function fetchPublicOrder(orderId: string): Promise<PublicOrder | null> {
+  const code = (orderId || '').trim().toUpperCase();
+  if (!code) return null;
+  const snap = await getDoc(doc(db, 'public_orders', code));
+  if (!snap.exists()) return null;
+  const data = snap.data() as Record<string, unknown>;
+  return {
+    id: typeof data.id === 'string' && data.id ? data.id : code,
+    clientName: typeof data.clientName === 'string' ? data.clientName : '',
+    phone: typeof data.phone === 'string' ? data.phone : '',
+    packageType: (typeof data.packageType === 'string' ? data.packageType : 'aodai-solo') as PublicOrder['packageType'],
+    status: (typeof data.status === 'string' ? data.status : 'new') as PublicOrder['status'],
+    preferredDate: typeof data.preferredDate === 'string' ? data.preferredDate : '',
+    timeSlot: typeof data.timeSlot === 'string' ? data.timeSlot : undefined,
+    estimatedPrice: typeof data.estimatedPrice === 'number' ? data.estimatedPrice : 0,
+    depositAmount: typeof data.depositAmount === 'number' ? data.depositAmount : 0,
+    paidAmount: typeof data.paidAmount === 'number' ? data.paidAmount : 0,
+    balance: typeof data.balance === 'number' ? data.balance : 0,
+    driveLink: typeof data.driveLink === 'string' ? data.driveLink : '',
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
+  };
+}
+
+/**
+ * Dong bo lai tra cuu cho TOAN BO don hien co (chi admin): ghi de tung
+ * lead len `public_orders` 1 lan — de cac don tao truoc v7.5 cung tra
+ * duoc moi may. Tra ve so don da dong bo thanh cong; don nao loi thi
+ * bo qua (ghi console) chu khong dung ca loat.
+ */
+export async function syncAllPublicOrders(leads: BookingLead[]): Promise<number> {
+  requireAdmin();
+  let synced = 0;
+  for (const lead of leads) {
+    try {
+      await savePublicOrder(lead);
+      synced += 1;
+    } catch (err) {
+      console.warn('Sync public order warning:', lead.id, err);
+    }
+  }
+  return synced;
 }

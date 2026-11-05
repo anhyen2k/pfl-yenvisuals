@@ -47,7 +47,27 @@ import {
   matchesPhoneSuffix,
   MAX_PROOFING_PHOTOS_PER_LEAD,
   PROOFING_QUERY_LIMIT,
+  buildPublicOrder,
+  validatePaidAmount,
+  matchesPublicOrderPhone,
+  getFirestoreErrorCode,
+  translateCloudError,
+  decideLeadWriteMode,
+  stripUndefinedFields,
+  isUploadStalled,
+  FIRESTORE_DATABASE_ID,
+  mergeOptimisticPhotos,
 } from './portfolioLogic.js';
+import {
+  selectJobsToStart,
+  computeQueueProgress,
+  shouldRetryJob,
+  retryDelayMs,
+  mapWithConcurrency,
+  MAX_CONCURRENT_UPLOADS,
+  MAX_UPLOAD_ATTEMPTS,
+  type UploadJob,
+} from '../services/uploadQueue.js';
 
 const mockPhotos: PhotoItem[] = [
   {
@@ -679,4 +699,231 @@ test('seo: describePhotoAlt ghep tieu de + dia diem, khong lap lai dia diem', ()
   );
   assert.equal(describePhotoAlt({ vietnameseTitle: '', location: 'Văn Miếu' }), 'Ảnh chụp tại Văn Miếu — Yên Photo');
   assert.equal(describePhotoAlt({}), 'Ảnh chụp bởi Yên Photo');
+});
+
+// --- v7.5: tra cuu don moi may (public_orders) ---
+
+test('v7.5 buildPublicOrder chi giu truong toi thieu, loai email/notes/cancelReason', () => {
+  const lead: any = {
+    id: 'KY-12345',
+    clientName: 'Nguyễn Thu Trang',
+    email: 'thutrang@gmail.com',
+    phone: '0961 230 500',
+    packageType: 'aodai-solo',
+    preferredDate: '2026-12-01',
+    timeSlot: 'sang-7-9',
+    status: 'deposited',
+    estimatedPrice: 650000,
+    depositAmount: 195000,
+    paidAmount: 195000,
+    balance: 455000,
+    driveLink: 'https://drive.google.com/drive/folders/xyz',
+    notes: 'Ghi chu noi bo: khach kho tinh',
+    message: 'Concept rieng cua khach',
+    cancelReason: 'Ly do huy neu co',
+    groupSize: '1 - 2 bạn',
+    source: 'web_form',
+    emailSentTo: 'anhyenk26@gmail.com',
+    emailSentAt: '10:00, 05/11/2026',
+  };
+  const pub = buildPublicOrder(lead);
+  assert.equal(pub.id, 'KY-12345');
+  assert.equal(pub.clientName, 'Nguyễn Thu Trang');
+  assert.equal(pub.phone, '0961230500');
+  assert.equal(pub.packageType, 'aodai-solo');
+  assert.equal(pub.status, 'deposited');
+  assert.equal(pub.preferredDate, '2026-12-01');
+  assert.equal(pub.timeSlot, 'sang-7-9');
+  assert.equal(pub.estimatedPrice, 650000);
+  assert.equal(pub.depositAmount, 195000);
+  assert.equal(pub.paidAmount, 195000);
+  assert.equal(pub.balance, 455000);
+  assert.equal(pub.driveLink, 'https://drive.google.com/drive/folders/xyz');
+  assert.ok(pub.updatedAt.length > 0);
+  // Khong co truong nhay cam nao lot sang ban ghi cong khai.
+  const keys = Object.keys(pub);
+  for (const forbidden of ['email', 'notes', 'message', 'cancelReason', 'groupSize', 'source', 'emailSentTo', 'emailSentAt']) {
+    assert.ok(!keys.includes(forbidden), `public order khong duoc co truong ${forbidden}`);
+  }
+});
+
+test('v7.5 buildPublicOrder tinh lai balance khi lead chua co', () => {
+  const pub = buildPublicOrder({
+    id: 'KY-99999',
+    clientName: 'A B',
+    phone: '+84 961 230 500',
+    packageType: 'kiyieu-lop',
+    preferredDate: '2026-12-05',
+    status: 'new',
+    estimatedPrice: 1200000,
+    depositAmount: 360000,
+    paidAmount: 360000,
+    balance: undefined,
+    driveLink: '',
+  } as any);
+  assert.equal(pub.phone, '0961230500');
+  assert.equal(pub.balance, 840000);
+});
+
+test('v7.5 doi chieu SDT tra cuu: chuan hoa ca 2 ben, khac so thi khong khop', () => {
+  assert.equal(matchesPublicOrderPhone('0961230500', '0961 230 500'), true);
+  assert.equal(matchesPublicOrderPhone('0961230500', '+84 961 230 500'), true);
+  assert.equal(matchesPublicOrderPhone('0961 230 500', '0961230500'), true);
+  assert.equal(matchesPublicOrderPhone('0961230500', '0961230501'), false);
+  assert.equal(matchesPublicOrderPhone('0961230500', '0987654321'), false);
+  assert.equal(matchesPublicOrderPhone('0961230500', ''), false);
+  assert.equal(matchesPublicOrderPhone('', '0961230500'), false);
+});
+
+test('v7.5 validatePaidAmount: am / vuot tong tien thi loi, 0 va bang tong thi hop le', () => {
+  assert.equal(validatePaidAmount(-1, 650000), 'Tiền đã thu phải là số nguyên từ 0 VNĐ trở lên.');
+  assert.equal(validatePaidAmount(650001, 650000), 'Đã thu không vượt quá tổng tiền đơn');
+  assert.equal(validatePaidAmount(1000000, 650000), 'Đã thu không vượt quá tổng tiền đơn');
+  assert.equal(validatePaidAmount(195000.5, 650000), 'Tiền đã thu phải là số nguyên từ 0 VNĐ trở lên.');
+  assert.equal(validatePaidAmount(0, 650000), null);
+  assert.equal(validatePaidAmount(195000, 650000), null);
+  assert.equal(validatePaidAmount(650000, 650000), null);
+});
+
+test('v7.6 getFirestoreErrorCode: trich ma tu .code, message tieng Anh, JSON-stringified, ma Storage', () => {
+  assert.equal(getFirestoreErrorCode({ code: 'firestore/permission-denied' }), 'permission-denied');
+  assert.equal(getFirestoreErrorCode({ code: 'permission-denied' }), 'permission-denied');
+  assert.equal(
+    getFirestoreErrorCode(new Error('FirebaseError: Missing or insufficient permissions.')),
+    'permission-denied'
+  );
+  assert.equal(
+    getFirestoreErrorCode(new Error(JSON.stringify({ code: 'permission-denied', error: 'x' }))),
+    'permission-denied'
+  );
+  assert.equal(
+    getFirestoreErrorCode(new Error(JSON.stringify({ error: 'FirebaseError: Missing or insufficient permissions.' }))),
+    'permission-denied'
+  );
+  assert.equal(getFirestoreErrorCode({ code: 'storage/unauthorized' }), 'storage/unauthorized');
+  assert.equal(
+    getFirestoreErrorCode(new Error('FirebaseError: User is not authorized. (storage/unauthorized)')),
+    'storage/unauthorized'
+  );
+  assert.equal(getFirestoreErrorCode(new Error('The client is offline')), 'unavailable');
+  assert.equal(getFirestoreErrorCode(new Error('something else entirely')), 'unknown');
+  assert.equal(getFirestoreErrorCode(null), 'unknown');
+});
+
+test('v7.6 translateCloudError: dich ma loi sang huong dan tieng Viet cu the', () => {
+  const denied = translateCloudError({ code: 'permission-denied' });
+  assert.ok(denied.includes('deploy nhầm database'));
+  assert.ok(denied.includes(FIRESTORE_DATABASE_ID));
+  assert.ok(translateCloudError({ code: 'unavailable' }).includes('Mất mạng'));
+  assert.ok(translateCloudError({ code: 'unauthenticated' }).includes('anhyenk26@gmail.com'));
+  const storage = translateCloudError({ code: 'storage/unauthorized' });
+  assert.ok(storage.includes('Storage rules chưa deploy'));
+  const stalled = translateCloudError(Object.assign(new Error('ket'), { code: 'upload-stalled' }));
+  assert.ok(stalled.includes('đổi wifi/4G'));
+  const other = translateCloudError({ code: 'weird-code' });
+  assert.ok(other.includes('weird-code'));
+});
+
+test('v7.6 decideLeadWriteMode: doc da co thi update, chua co thi create', () => {
+  assert.equal(decideLeadWriteMode(true), 'update');
+  assert.equal(decideLeadWriteMode(false), 'create');
+});
+
+test('v7.6 stripUndefinedFields: loai undefined, giu 0 / chuoi rong / false', () => {
+  assert.deepEqual(stripUndefinedFields({ a: 1, b: undefined, c: 0, d: '', e: false }), {
+    a: 1,
+    c: 0,
+    d: '',
+    e: false,
+  });
+});
+
+test('v7.6 isUploadStalled: qua timeout thi ket, dung timeout thi chua ket', () => {
+  assert.equal(isUploadStalled(0, 20001), true);
+  assert.equal(isUploadStalled(0, 20000), false);
+  assert.equal(isUploadStalled(0, 1000), false);
+  assert.equal(isUploadStalled(1000, 121001, 120000), true);
+  assert.equal(isUploadStalled(1000, 121000, 120000), false);
+});
+
+// --- v7.7: hang doi tai nen + anh lac quan ---
+
+function makeJob(id: string, status: UploadJob['status'], progress = 0, attempts = 1): UploadJob {
+  return {
+    id,
+    label: id,
+    status,
+    progress,
+    attempts,
+    run: async () => {},
+  };
+}
+
+test('v7.7 selectJobsToStart: toi da 4 job cung luc, uu tien job cho truoc', () => {
+  assert.equal(MAX_CONCURRENT_UPLOADS, 4);
+  const queued = Array.from({ length: 6 }, (_, i) => makeJob(`q${i}`, 'queued'));
+  assert.deepEqual(selectJobsToStart(queued).map((j) => j.id), ['q0', 'q1', 'q2', 'q3']);
+  const mixed = [
+    makeJob('r0', 'uploading'),
+    makeJob('r1', 'uploading'),
+    makeJob('q0', 'queued'),
+    makeJob('q1', 'queued'),
+    makeJob('q2', 'queued'),
+  ];
+  assert.deepEqual(selectJobsToStart(mixed).map((j) => j.id), ['q0', 'q1']);
+  const full = Array.from({ length: 4 }, (_, i) => makeJob(`r${i}`, 'uploading'));
+  assert.deepEqual(selectJobsToStart([...full, makeJob('q0', 'queued')]), []);
+  assert.deepEqual(selectJobsToStart([]), []);
+});
+
+test('v7.7 computeQueueProgress: dem xong/tong + % trung binh tien do', () => {
+  assert.deepEqual(computeQueueProgress([]), { done: 0, total: 0, percent: 100 });
+  const jobs = [
+    makeJob('a', 'done', 100),
+    makeJob('b', 'uploading', 50),
+    makeJob('c', 'queued', 0),
+  ];
+  assert.deepEqual(computeQueueProgress(jobs), { done: 1, total: 3, percent: 50 });
+});
+
+test('v7.7 shouldRetryJob + retryDelayMs: thu lai toi da 3 lan, cho 2s roi 5s', () => {
+  assert.equal(MAX_UPLOAD_ATTEMPTS, 3);
+  assert.equal(shouldRetryJob(makeJob('a', 'error', 0, 1)), true);
+  assert.equal(shouldRetryJob(makeJob('a', 'error', 0, 2)), true);
+  assert.equal(shouldRetryJob(makeJob('a', 'error', 0, 3)), false);
+  assert.equal(shouldRetryJob(makeJob('a', 'done', 100, 1)), false);
+  assert.equal(shouldRetryJob(makeJob('a', 'uploading', 10, 1)), false);
+  assert.equal(retryDelayMs(1), 2000);
+  assert.equal(retryDelayMs(2), 5000);
+  assert.equal(retryDelayMs(3), 5000);
+});
+
+test('v7.7 mapWithConcurrency: tra ket qua dung thu tu, loi khong dung ca loat', async () => {
+  const out = await mapWithConcurrency([1, 2, 3, 4], 2, async (n) => {
+    if (n === 3) throw new Error('hong');
+    return n * 10;
+  });
+  assert.equal(out.length, 4);
+  assert.deepEqual(out[0], { ok: true, value: 10 });
+  assert.deepEqual(out[1], { ok: true, value: 20 });
+  assert.equal(out[2].ok, false);
+  assert.deepEqual(out[3], { ok: true, value: 40 });
+});
+
+test('v7.7 mergeOptimisticPhotos: anh moi len truoc, anh sua hien ban xem truoc', () => {
+  const base = [
+    { id: 'a', image: 'cloud-a.jpg', vietnameseTitle: 'A' },
+    { id: 'b', image: 'cloud-b.jpg', vietnameseTitle: 'B' },
+  ] as PhotoItem[];
+  const pending = [{ id: 'new', image: 'blob:preview', vietnameseTitle: 'Moi' }] as PhotoItem[];
+  const merged = mergeOptimisticPhotos(base, pending, { a: 'blob:edit-a' });
+  assert.deepEqual(merged.map((p) => p.id), ['new', 'a', 'b']);
+  assert.equal(merged[1].image, 'blob:edit-a');
+  assert.equal(merged[2].image, 'cloud-b.jpg');
+  // Mang goc khong bi sua doi.
+  assert.equal(base[0].image, 'cloud-a.jpg');
+  assert.deepEqual(mergeOptimisticPhotos(base, [], {}), base);
+  // Sua anh moi dang dong bo: ban xem truoc moi nhat ap ca len anh lac quan.
+  const editedPending = mergeOptimisticPhotos(base, pending, { new: 'blob:edit-new' });
+  assert.equal(editedPending[0].image, 'blob:edit-new');
 });

@@ -5,14 +5,17 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Image as ImageIcon, Camera, Plus, Check } from 'lucide-react';
-import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, CATEGORY_LABELS, type PendingPhotoUpload } from '../utils/portfolioLogic';
 import { PHOTO_SERIES } from '../data/portfolioData';
-import { compressImageFile, uploadPhotoWithThumbnail } from '../services/firebase';
+import { compressImageFile } from '../services/firebase';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddPhoto: (newPhoto: PhotoItem) => void;
+  /** (v7.7) Anh hien ngay trong Gallery, tai len chay ngam trong hang doi:
+   *  `upload` kem file goc + blob da nen san + URL xem truoc local. Khong
+   *  co `upload` (chi dan URL anh) thi luu thang nhu cu. */
+  onAddPhoto: (newPhoto: PhotoItem, upload?: PendingPhotoUpload) => void;
 }
 
 export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
@@ -46,8 +49,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
   const previewUrlRef = useRef('');
 
   // Thu hoi object URL preview khi dong modal / unmount, tranh ro bo nho.
@@ -80,7 +81,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       previewUrlRef.current = previewUrl;
       setSelectedFile(file);
       setCompressedBlob(null);
-      setUploadPct(0);
       setImageUrlInput('');
       setImagePreview(previewUrl);
       setError('');
@@ -122,7 +122,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     setSelectedFile(null);
     setCompressedBlob(null);
     setIsCompressing(false);
-    setUploadPct(0);
     setImageUrlInput('');
   };
 
@@ -153,8 +152,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     setSelectedFile(null);
     setCompressedBlob(null);
     setIsCompressing(false);
-    setUploadPct(0);
-    setIsUploading(false);
   };
 
   const handleClose = () => {
@@ -169,18 +166,18 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       setSelectedFile(null);
       setCompressedBlob(null);
       setIsCompressing(false);
-      setUploadPct(0);
       setImagePreview(imageUrlInput.trim());
       setError('');
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // (v7.7) Tai len TUC THI: bam Luu la anh hien ngay trong Gallery va
+  // modal dong luon — KHONG cho upload xong moi dong nhu truoc. File +
+  // blob da nen san duoc giao cho App dua vao hang doi tai nen; anh
+  // hien bang URL xem truoc local, xong dong bo thi doi sang URL Cloud.
+  // Bam Luu ca khi dang nen (blob chua xong thi hang doi se tu nen lai).
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isCompressing) {
-      setError('Đang nén ảnh, vui lòng đợi vài giây rồi bấm lại.');
-      return;
-    }
     if (!vietnameseTitle.trim()) {
       setError('Vui lòng nhập tiêu đề tác phẩm');
       return;
@@ -191,35 +188,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     }
 
     const newPhotoId = `custom-photo-${Date.now()}`;
-
-    // Co file: blob da nen san tu luc chon file, chi con upload len
-    // Firebase Storage lay downloadURL roi moi goi onAddPhoto.
-    // (v6) Upload kem thumbnail ~600px WebP de Gallery load thumb truoc.
-    let imageUrl = imagePreview;
-    let thumbUrl: string | undefined;
-    if (selectedFile) {
-      setIsUploading(true);
-      setUploadPct(0);
-      setError('');
-      try {
-        const uploaded = await uploadPhotoWithThumbnail(
-          selectedFile,
-          newPhotoId,
-          (pct) => setUploadPct(pct),
-          compressedBlob ?? undefined
-        );
-        imageUrl = uploaded.url;
-        thumbUrl = uploaded.thumbUrl;
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        setError(
-          `Tải ảnh lên Storage thất bại: ${detail} Vui lòng kiểm tra Storage rules đã deploy chưa rồi thử lại.`
-        );
-        setIsUploading(false);
-        return;
-      }
-      setIsUploading(false);
-    }
 
     const tagArray = tags
       .split(',')
@@ -241,8 +209,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       iso: Number(iso) || 100,
       description: description.trim() || 'Tác phẩm mới được thêm vào bộ sưu tập cá nhân.',
       story: story.trim() || description.trim(),
-      image: imageUrl,
-      thumbUrl,
+      image: imagePreview,
       aspectRatio,
       orientation,
       seriesId: seriesId || undefined,
@@ -250,7 +217,13 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       edition: 'Bộ ảnh kỉ yếu & áo dài',
     };
 
-    onAddPhoto(newPhoto);
+    // Giao URL xem truoc cho App lam anh lac quan — phai go ref truoc
+    // khi resetForm() vi resetForm se thu hoi URL nay.
+    const upload: PendingPhotoUpload | undefined = selectedFile
+      ? { file: selectedFile, compressedBlob, previewUrl: imagePreview }
+      : undefined;
+    if (selectedFile) previewUrlRef.current = '';
+    onAddPhoto(newPhoto, upload);
     resetForm();
     onClose();
   };
@@ -529,14 +502,9 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isUploading || isCompressing}
-              className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+              className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer"
             >
-              {isCompressing
-                ? 'Đang nén ảnh...'
-                : isUploading
-                  ? `Đang tải lên ${uploadPct}%...`
-                  : 'Thêm Vào Portfolio'}
+              {isCompressing ? 'Đang nén ảnh… (vẫn lưu được ngay)' : 'Thêm Vào Portfolio'}
             </button>
           </div>
         </form>
