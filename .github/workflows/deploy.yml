@@ -1,3 +1,5 @@
+# Deploy Vite app to GitHub Pages (project site: anhyen2k.github.io/pfl-yenvisuals/)
+# In repo Settings > Pages > Build and deployment, set Source = GitHub Actions.
 name: Deploy to GitHub Pages
 
 on:
