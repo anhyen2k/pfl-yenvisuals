@@ -19,6 +19,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { PhotoItem, formatExifString } from '../utils/portfolioLogic';
+import { withBase } from '../utils/cleanPaths';
 
 interface LightboxModalProps {
   photo: PhotoItem | null;
@@ -102,7 +103,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
   };
 
   const handleCopyLink = async () => {
-    const link = `${window.location.origin}#photo-${photo.id}`;
+    const link = `${window.location.origin}${withBase('/')}#photo-${photo.id}`;
     let ok = false;
     try {
       await navigator.clipboard?.writeText(link);

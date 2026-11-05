@@ -25,6 +25,7 @@ import { SITE_CONFIG } from './config/site';
 import {
   BOOKING_PATH,
   navigateToSection,
+  withBase,
   normalizePath,
   pathForHash,
   photoIdForHash,
@@ -154,7 +155,7 @@ export default function App() {
   const [selectedPhotoForLightbox, setSelectedPhotoForLightbox] = useState<PhotoItem | null>(null);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
 
-  // --- Clean paths (Vercel, không dùng react-router) ---
+  // --- Clean paths (GitHub Pages, không dùng react-router) ---
   // /tac-pham -> #gallery, /bo-suu-tap -> #series, /ve-toi -> #about,
   // /lien-he -> #contact, /dat-lich -> mở BookingModal, / -> trang chủ.
   // Link cũ #about vẫn chạy: đổi thành /ve-toi rồi cuộn tới mục.
@@ -218,11 +219,11 @@ export default function App() {
   // Đồng bộ URL với BookingModal: mở modal -> /dat-lich, đóng -> về đường dẫn trước đó.
   useEffect(() => {
     if (isBookingOpen) {
-      if (window.location.pathname !== BOOKING_PATH) {
+      if (window.location.pathname !== withBase(BOOKING_PATH)) {
         lastPathBeforeBookingRef.current = window.location.pathname;
-        window.history.pushState(null, '', BOOKING_PATH);
+        window.history.pushState(null, '', withBase(BOOKING_PATH));
       }
-    } else if (window.location.pathname === BOOKING_PATH) {
+    } else if (window.location.pathname === withBase(BOOKING_PATH)) {
       window.history.replaceState(null, '', lastPathBeforeBookingRef.current || '/');
     }
   }, [isBookingOpen]);

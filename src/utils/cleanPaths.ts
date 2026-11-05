@@ -1,7 +1,28 @@
 // Clean paths cho web 1 trang dài — KHÔNG dùng react-router, không thêm dependency.
-// GitHub Pages cần file 404.html vì hosting tĩnh không hiểu /ve-toi; Vercel thì
-// vercel.json đã rewrite mọi đường dẫn về /index.html nên /ve-toi load thẳng được.
+// GitHub Pages (project site): web nằm ở /pfl-yenvisuals/ nên mọi đường dẫn
+// sạch đều có tiền tố base đó, vd /pfl-yenvisuals/ve-toi. import.meta.env.BASE_URL
+// là '/pfl-yenvisuals/' (từ vite.config.ts). Vercel dùng base '/' nên cùng code
+// này chạy được cả 2 nơi, chỉ khác APP_BASE.
+// Khi load trực tiếp /pfl-yenvisuals/ve-toi, Pages trả 404.html; file đó lưu
+// đường dẫn vào ?/... rồi redirect về index, script trong index.html khôi
+// phục lại đường dẫn rồi App cuộn tới đúng mục. F5 không trắng trang.
 // Link cũ dạng #about vẫn chạy: App sẽ đổi nó thành /ve-toi khi load.
+export const APP_BASE: string = (import.meta.env.BASE_URL ?? '/').replace(/\/+$/, '');
+
+/** Ghép tiền tố base: withBase('/ve-toi') -> '/pfl-yenvisuals/ve-toi'. */
+export function withBase(path: string): string {
+  return APP_BASE + path;
+}
+
+/** Bỏ tiền tố base để so khớp route: '/pfl-yenvisuals/ve-toi' -> '/ve-toi'. */
+export function stripBase(path: string): string {
+  if (APP_BASE && path.startsWith(APP_BASE)) {
+    const rest = path.slice(APP_BASE.length);
+    return rest === '' ? '/' : rest;
+  }
+  return path;
+}
+
 export const SECTION_PATHS: Record<string, string> = {
   gallery: '/tac-pham',
   series: '/bo-suu-tap',
@@ -19,8 +40,9 @@ export const PATH_SECTIONS: Record<string, string> = {
 export const BOOKING_PATH = '/dat-lich';
 
 export function normalizePath(path: string): string {
-  if (!path || path === '/') return '/';
-  const cleaned = path.replace(/\/+$/, '');
+  const stripped = stripBase(path || '');
+  if (!stripped || stripped === '/') return '/';
+  const cleaned = stripped.replace(/\/+$/, '');
   return cleaned === '' ? '/' : cleaned.toLowerCase();
 }
 
@@ -29,13 +51,13 @@ export function sectionIdForPath(path: string): string | null {
 }
 
 export function pathForSectionId(sectionId: string): string {
-  return SECTION_PATHS[sectionId] ?? '/';
+  return withBase(SECTION_PATHS[sectionId] ?? '/');
 }
 
 export function pathForHash(hash: string): string | null {
   const id = hash.replace(/^#/, '');
-  if (id === '') return '/';
-  if (id in SECTION_PATHS) return SECTION_PATHS[id];
+  if (id === '') return withBase('/');
+  if (id in SECTION_PATHS) return withBase(SECTION_PATHS[id]);
   return null;
 }
 
@@ -68,8 +90,9 @@ export function navigateToSection(sectionId: string): void {
 }
 
 export function navigateHome(): void {
-  if (window.location.pathname !== '/') {
-    window.history.pushState(null, '', '/');
+  const home = withBase('/');
+  if (window.location.pathname !== home) {
+    window.history.pushState(null, '', home);
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }

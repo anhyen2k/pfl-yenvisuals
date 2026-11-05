@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { Camera, Sun, Moon, Plus, Menu, X, Heart, ShieldCheck, Mail, Lock, LogOut, Crown } from 'lucide-react';
 import { UserRole } from '../utils/portfolioLogic';
-import { navigateHome, navigateToSection } from '../utils/cleanPaths';
+import { navigateHome, navigateToSection, pathForSectionId, withBase } from '../utils/cleanPaths';
 
 interface NavbarProps {
   darkMode: boolean;
@@ -49,7 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand wordmark */}
         <a
-          href="/"
+          href={withBase('/')}
           onClick={(e) => {
             e.preventDefault();
             if (currentView === 'dashboard') {
@@ -69,21 +69,21 @@ export const Navbar: React.FC<NavbarProps> = ({
           {currentView === 'portfolio' ? (
             <>
               <a
-                href="/tac-pham"
+                href={pathForSectionId('gallery')}
                 onClick={(e) => { e.preventDefault(); navigateToSection('gallery'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Tác Phẩm
               </a>
               <a
-                href="/bo-suu-tap"
+                href={pathForSectionId('series')}
                 onClick={(e) => { e.preventDefault(); navigateToSection('series'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Bộ Ảnh Triển Lãm
               </a>
               <a
-                href="/ve-toi"
+                href={pathForSectionId('about')}
                 onClick={(e) => { e.preventDefault(); navigateToSection('about'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
@@ -98,7 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Khu Vực Khách Hàng</span>
               </button>
               <a
-                href="/lien-he"
+                href={pathForSectionId('contact')}
                 onClick={(e) => { e.preventDefault(); navigateToSection('contact'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
@@ -277,21 +277,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Standard Navigation Links */}
           <a
-            href="/tac-pham"
+            href={pathForSectionId('gallery')}
             onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('gallery'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Tác Phẩm
           </a>
           <a
-            href="/bo-suu-tap"
+            href={pathForSectionId('series')}
             onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('series'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Bộ Ảnh Triển Lãm
           </a>
           <a
-            href="/ve-toi"
+            href={pathForSectionId('about')}
             onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('about'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
@@ -309,7 +309,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ShieldCheck className="w-4 h-4 text-neutral-400" />
           </button>
           <a
-            href="/lien-he"
+            href={pathForSectionId('contact')}
             onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('contact'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >

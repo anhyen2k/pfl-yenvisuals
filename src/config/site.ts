@@ -7,7 +7,7 @@ export const SITE_CONFIG = {
   phoneDisplay: '0912 888 266',
   zaloUrl: 'https://zalo.me/0912888266',
   city: 'Hà Nội',
-  siteUrl: 'https://pfl-yenphoto.vercel.app/',
+  siteUrl: 'https://anhyen2k.github.io/pfl-yenvisuals/',
   brandName: 'Yên Photo',
 } as const;
 

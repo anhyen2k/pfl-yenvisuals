@@ -403,7 +403,7 @@ test('gia kiyieu tren dau nguoi dung 80k-240k/ban', () => {
 test('email log dung siteUrl that va fromEmail dung email nhan', () => {
   const { emailLog } = createBookingLead({ clientName: 'Test', email: 't@x.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', message: '' } as any, 'anhyenk26@gmail.com');
   assert.equal(emailLog.fromEmail, 'anhyenk26@gmail.com');
-  assert.ok(emailLog.fullBody.includes('https://pfl-yenphoto.vercel.app/'));
+  assert.ok(emailLog.fullBody.includes('https://anhyen2k.github.io/pfl-yenvisuals/'));
   assert.ok(!emailLog.fullBody.includes('ais-dev'));
 });
 

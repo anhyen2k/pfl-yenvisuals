@@ -52,7 +52,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       } else if (err?.code) {
         const guidanceByCode: Record<string, string> = {
           'auth/unauthorized-domain':
-            'Domain pfl-yenphoto.vercel.app chưa được thêm vào Firebase Authentication > Settings > Authorized domains.',
+            'Domain anhyenk2k.github.io chưa được thêm vào Firebase Authentication > Settings > Authorized domains.',
           'auth/operation-not-allowed':
             'Chưa bật đăng nhập Google trong Firebase Authentication > Sign-in method.',
           'auth/popup-blocked':
