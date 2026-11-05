@@ -1,0 +1,6 @@
+{
+  "name": "Yên Visuals — Kỉ Yếu & Áo Dài Portfolio",
+  "description": "Portfolio nhiếp ảnh kỉ yếu học đường, áo cử nhân và áo dài nghệ thuật chuyên nghiệp tại Hà Nội & Sài Gòn.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

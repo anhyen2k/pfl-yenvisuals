@@ -1,0 +1,82 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        ('email' in request.auth.token && request.auth.token.email.lower() == "anhyenk26@gmail.com") ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidBookingLead(data) {
+      return data.keys().hasAll(['clientName', 'email', 'phone', 'packageType', 'preferredDate'])
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 200
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 200
+        && data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 30
+        && data.packageType is string && data.packageType.size() <= 64
+        && data.preferredDate is string && data.preferredDate.size() <= 30
+        && (!('location' in data) || (data.location is string && data.location.size() <= 200))
+        && (!('groupSize' in data) || (data.groupSize is string && data.groupSize.size() <= 100))
+        && (!('message' in data) || (data.message is string && data.message.size() <= 2000))
+        && (!('status' in data) || (data.status in ['new', 'consulting', 'deposited', 'completed', 'cancelled']))
+        && (!('estimatedPrice' in data) || data.estimatedPrice is number);
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Admins collection
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Booking Leads: Anyone can submit a booking inquiry, Admin can manage
+    match /booking_leads/{leadId} {
+      allow create: if isValidId(leadId) && isValidBookingLead(incoming());
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    // Email Notification Logs
+    match /email_logs/{logId} {
+      allow create: if isValidId(logId) && incoming().keys().hasAll(['leadId', 'toEmail', 'subject', 'sentAt']);
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    function isValidPhoto(data) {
+      return data.keys().hasAll(['title', 'category', 'location', 'camera', 'lens', 'image'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.category is string && data.category.size() <= 64
+        && data.location is string && data.location.size() <= 200
+        && data.camera is string && data.camera.size() <= 100
+        && data.lens is string && data.lens.size() <= 100
+        && data.image is string && data.image.size() <= 50000;
+    }
+
+    // Portfolio Photos: Public read for visitors, create with validation, Admin update/delete
+    match /portfolio_photos/{photoId} {
+      allow get, list: if true;
+      allow create: if isAdmin() && isValidId(photoId) && isValidPhoto(incoming());
+      allow update, delete: if isAdmin() && isValidId(photoId);
+    }
+  }
+}

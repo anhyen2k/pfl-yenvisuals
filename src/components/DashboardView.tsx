@@ -1,0 +1,1312 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState } from 'react';
+import {
+  Users,
+  Mail,
+  Phone,
+  MessageSquare,
+  CheckCircle2,
+  Clock,
+  Sparkles,
+  Download,
+  FileSpreadsheet,
+  Plus,
+  Search,
+  Filter,
+  ArrowLeft,
+  Settings,
+  Image as ImageIcon,
+  DollarSign,
+  AlertCircle,
+  ExternalLink,
+  Trash2,
+  Copy,
+  Send,
+  Eye,
+  Camera,
+  GraduationCap,
+  LogOut,
+  Loader2,
+} from 'lucide-react';
+import {
+  BookingLead,
+  BookingStatus,
+  EmailNotificationLog,
+  PhotoItem,
+  filterLeads,
+  calculateDashboardStats,
+  formatStatusLabel,
+  formatVND,
+  exportLeadsToCsv,
+  exportLeadsToExcel,
+  getPackageDetails,
+  sendBookingEmailReal,
+} from '../utils/portfolioLogic';
+
+interface DashboardViewProps {
+  leads: BookingLead[];
+  onUpdateLeadStatus: (leadId: string, status: BookingStatus) => void;
+  onUpdateLeadNotes: (leadId: string, notes: string) => void;
+  onDeleteLead: (leadId: string) => void;
+  onAddManualLead: (lead: Omit<BookingLead, 'id' | 'createdAt' | 'emailSentAt' | 'emailSentTo'>) => void;
+  emailLogs: EmailNotificationLog[];
+  onSendTestEmail: () => void;
+  photographerEmail: string;
+  onUpdatePhotographerEmail: (email: string) => void;
+  photos: PhotoItem[];
+  onToggleFeaturedPhoto: (photoId: string) => void;
+  onDeletePhoto: (photoId: string) => void;
+  onOpenAddPhoto: () => void;
+  onExitDashboard: () => void;
+  onLogoutAdmin?: () => void;
+  currentUser?: any;
+  onGoogleLogin?: () => void;
+}
+
+export const DashboardView: React.FC<DashboardViewProps> = ({
+  leads,
+  onUpdateLeadStatus,
+  onUpdateLeadNotes,
+  onDeleteLead,
+  onAddManualLead,
+  emailLogs,
+  onSendTestEmail,
+  photographerEmail,
+  onUpdatePhotographerEmail,
+  photos,
+  onToggleFeaturedPhoto,
+  onDeletePhoto,
+  onOpenAddPhoto,
+  onExitDashboard,
+  onLogoutAdmin,
+  currentUser,
+  onGoogleLogin,
+}) => {
+  const [activeTab, setActiveTab] = useState<'leads' | 'emails' | 'photos' | 'settings'>('leads');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Selected lead for detail/notes modal
+  const [editingLead, setEditingLead] = useState<BookingLead | null>(null);
+  const [editNotesText, setEditNotesText] = useState<string>('');
+
+  // Selected email log for full preview modal
+  const [viewingEmailLog, setViewingEmailLog] = useState<EmailNotificationLog | null>(null);
+
+  // Manual Lead Creation modal
+  const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
+  const [newLeadForm, setNewLeadForm] = useState({
+    clientName: '',
+    phone: '',
+    email: '',
+    packageType: 'aodai-solo' as BookingLead['packageType'],
+    preferredDate: '',
+    location: 'Hà Nội',
+    groupSize: '1 - 2 bạn',
+    message: '',
+    notes: 'Liên hệ qua Zalo / Facebook',
+    estimatedPrice: 650000,
+    status: 'new' as BookingStatus,
+    source: 'manual_entry' as const,
+  });
+
+  // Copy toast state
+  const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
+
+  const stats = calculateDashboardStats(leads, photos.length);
+  const filteredLeads = filterLeads(leads, statusFilter, searchQuery);
+
+  const triggerCopyToast = (msg: string) => {
+    setCopiedNotification(msg);
+    setTimeout(() => setCopiedNotification(null), 2500);
+  };
+
+  const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
+
+  const handleExportExcel = () => {
+    try {
+      const excelBytes = exportLeadsToExcel(leads);
+      const blob = new Blob([excelBytes.buffer as ArrayBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Danh-sach-khach-hang-YenVisuals-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      triggerCopyToast('Đã xuất file Excel (.xlsx) thành công!');
+    } catch (err) {
+      console.error('Export Excel error', err);
+      triggerCopyToast('Lỗi xuất Excel, vui lòng thử lại');
+    }
+  };
+
+  const handleExportCsv = () => {
+    const csvContent = exportLeadsToCsv(leads);
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Danh-sach-khach-hang-YenVisuals-${Date.now().toString().slice(-4)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    triggerCopyToast('Đã tải xuống file CSV thành công!');
+  };
+
+  const handleResendEmailDirect = async (log: EmailNotificationLog) => {
+    const matchingLead = leads.find((l) => l.id === log.leadId);
+    if (!matchingLead) {
+      triggerCopyToast('Không tìm thấy thông tin khách hàng tương ứng.');
+      return;
+    }
+
+    setSendingEmailId(log.id);
+    try {
+      const res = await sendBookingEmailReal(matchingLead, photographerEmail);
+      triggerCopyToast(res.message);
+    } catch (err: any) {
+      triggerCopyToast('Lỗi gửi mail: ' + (err?.message || 'Thử lại sau'));
+    } finally {
+      setSendingEmailId(null);
+    }
+  };
+
+  const handleSaveNotes = () => {
+    if (editingLead) {
+      onUpdateLeadNotes(editingLead.id, editNotesText);
+      setEditingLead(null);
+      triggerCopyToast('Đã lưu ghi chú tư vấn thành công!');
+    }
+  };
+
+  const handleCreateManualLeadSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLeadForm.clientName || !newLeadForm.phone) {
+      alert('Vui lòng nhập tên khách hàng và số điện thoại!');
+      return;
+    }
+    const pkg = getPackageDetails(newLeadForm.packageType);
+    onAddManualLead({
+      ...newLeadForm,
+      estimatedPrice: pkg.basePriceVND,
+    });
+    setIsAddLeadModalOpen(false);
+    setNewLeadForm({
+      clientName: '',
+      phone: '',
+      email: '',
+      packageType: 'aodai-solo',
+      preferredDate: '',
+      location: 'Hà Nội',
+      groupSize: '1 - 2 bạn',
+      message: '',
+      notes: '',
+      estimatedPrice: 650000,
+      status: 'new',
+      source: 'manual_entry',
+    });
+    triggerCopyToast('Đã thêm khách hàng mới vào hệ thống!');
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-100 dark:bg-[#070709] text-neutral-900 dark:text-neutral-100 flex flex-col font-sans">
+      {/* Toast Notification */}
+      {copiedNotification && (
+        <div className="fixed bottom-6 right-6 z-50 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 px-4 py-2.5 rounded-lg text-xs font-medium shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
+          <span>{copiedNotification}</span>
+        </div>
+      )}
+
+      {/* Top Header of Admin Dashboard */}
+      <header className="sticky top-0 z-40 bg-white/95 dark:bg-[#0c0c0e]/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4">
+          {/* Left: Back to Portfolio & Admin Badge */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onExitDashboard}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+              title="Quay lại giao diện xem ảnh công khai"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Về Portfolio</span>
+            </button>
+
+            <div className="hidden sm:block h-4 w-px bg-neutral-300 dark:bg-neutral-700" />
+
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-serif font-bold text-base tracking-wide text-neutral-900 dark:text-white">
+                  YÊN VISUALS
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 font-semibold border border-amber-300 dark:border-amber-800">
+                  DASHBOARD QUẢN TRỊ
+                </span>
+                {currentUser ? (
+                  <span className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Cloud Firestore ({currentUser.email || 'Lưu vĩnh viễn'})</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onGoogleLogin}
+                    className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                    title="Bấm để đăng nhập tài khoản Google anhyenk26@gmail.com và kích hoạt đồng bộ đám mây thời gian thực"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span>Đồng bộ Google Cloud (anhyenk26@gmail.com)</span>
+                  </button>
+                )}
+              </div>
+              <div className="text-[11px] text-neutral-500 font-mono hidden sm:block">
+                Quản lý lịch chụp, đồng bộ thời gian thực đám mây & xuất file Excel
+              </div>
+            </div>
+          </div>
+
+          {/* Right: User Profile & Quick Actions */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Quick stats indicator */}
+            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-xs font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-neutral-600 dark:text-neutral-300">{photographerEmail}</span>
+              <span className="text-neutral-400">· Sony A7 III</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsAddLeadModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Thêm Khách Mới</span>
+              <span className="sm:hidden">+ Khách</span>
+            </button>
+
+            {onLogoutAdmin && (
+              <button
+                type="button"
+                onClick={onLogoutAdmin}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 bg-neutral-100 dark:bg-neutral-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-neutral-200 dark:border-neutral-700 transition-colors cursor-pointer"
+                title="Đăng xuất chế độ quản trị viên"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Đăng Xuất</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Dashboard Body */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
+        {/* KPI Metrics Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          {/* Card 1: Total Leads */}
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+              <span>TỔNG YÊU CẦU</span>
+              <Users className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
+              {stats.totalLeads}
+            </div>
+            <div className="text-[11px] text-neutral-500">
+              Tỷ lệ chốt thành công: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{stats.conversionRate}%</span>
+            </div>
+          </div>
+
+          {/* Card 2: New Leads Requiring Consultation */}
+          <div className="p-5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-amber-700 dark:text-amber-400 font-medium">
+              <span>CẦN TƯ VẤN GẤP</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-serif font-bold text-amber-900 dark:text-amber-300 tabular-nums">
+              {stats.newLeads}
+            </div>
+            <div className="text-[11px] text-amber-700 dark:text-amber-400">
+              Khách mới gửi form chưa liên hệ
+            </div>
+          </div>
+
+          {/* Card 3: Deposited / Booked */}
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+              <span>ĐÃ CHỐT / ĐÃ CỌC</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
+              {stats.depositedLeads + stats.completedLeads}
+            </div>
+            <div className="text-[11px] text-neutral-500">
+              Đang tư vấn Zalo: <span className="font-mono text-sky-600 dark:text-sky-400">{stats.consultingLeads} khách</span>
+            </div>
+          </div>
+
+          {/* Card 4: Estimated Revenue */}
+          <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
+            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+              <span>DOANH THU ĐÃ CHỐT</span>
+              <DollarSign className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-xl sm:text-2xl font-serif font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+              {formatVND(stats.estimatedRevenue)}
+            </div>
+            <div className="text-[11px] text-neutral-500">
+              Tiềm năng: <span className="font-mono">{formatVND(stats.potentialRevenue)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-2">
+          <div className="flex items-center gap-1 sm:gap-2 bg-neutral-200/60 dark:bg-neutral-800/60 p-1 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setActiveTab('leads')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'leads'
+                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Khách Đăng Ký ({leads.length})</span>
+              {stats.newLeads > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                  {stats.newLeads}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('emails')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'emails'
+                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900'
+              }`}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>Email Thông Báo ({emailLogs.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('photos')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'photos'
+                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>Quản Lý Ảnh ({photos.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'settings'
+                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs font-semibold'
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Cài Đặt & Gói Chụp</span>
+            </button>
+          </div>
+
+          {/* Quick utility buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-800 rounded-md transition-colors cursor-pointer shadow-xs"
+              title="Xuất dữ liệu khách ra file Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Xuất File Excel (.xlsx)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white border border-neutral-200 dark:border-neutral-800 rounded-md transition-colors cursor-pointer"
+              title="Tải bản dự phòng CSV"
+            >
+              <Download className="w-3 h-3" />
+              <span className="hidden md:inline">CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onSendTestEmail}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md transition-colors cursor-pointer shadow-xs"
+              title="Gửi thử một email thông báo mẫu về hộp thư của bạn"
+            >
+              <Send className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden sm:inline">Gửi Email Test</span>
+            </button>
+          </div>
+        </div>
+
+        {/* TAB 1: LEADS MANAGEMENT (CRM) */}
+        {activeTab === 'leads' && (
+          <div className="space-y-6">
+            {/* Search and Filter toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              {/* Search box */}
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  type="text"
+                  placeholder="Tìm theo tên khách, SĐT, trường học, địa điểm..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 text-xs bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-hidden focus:ring-1 focus:ring-amber-500 dark:text-white"
+                />
+              </div>
+
+              {/* Status filter tabs */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs">
+                {[
+                  { id: 'all', label: 'Tất Cả' },
+                  { id: 'new', label: 'Mới Nhận' },
+                  { id: 'consulting', label: 'Đang Tư Vấn' },
+                  { id: 'deposited', label: 'Đã Cọc' },
+                  { id: 'completed', label: 'Đã Chụp' },
+                  { id: 'cancelled', label: 'Đã Hủy' },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setStatusFilter(s.id)}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer whitespace-nowrap font-medium ${
+                      statusFilter === s.id
+                        ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 font-semibold'
+                        : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Leads Table Card */}
+            <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 text-neutral-500 font-mono text-[11px] uppercase">
+                      <th className="py-3 px-4 font-semibold">Khách Hàng & Liên Hệ</th>
+                      <th className="py-3 px-4 font-semibold">Gói Chụp & Giá</th>
+                      <th className="py-3 px-4 font-semibold">Ngày & Địa Điểm</th>
+                      <th className="py-3 px-4 font-semibold">Trạng Thái</th>
+                      <th className="py-3 px-4 font-semibold">Ghi Chú Tư Vấn</th>
+                      <th className="py-3 px-4 font-semibold text-right">Hành Động Trực Tiếp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                    {filteredLeads.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-12 text-center text-neutral-400">
+                          <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                          <p>Không tìm thấy yêu cầu tư vấn nào phù hợp.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLeads.map((lead) => {
+                        const statusBadge = formatStatusLabel(lead.status);
+                        const cleanPhone = lead.phone.replace(/[^0-9]/g, '');
+
+                        return (
+                          <tr
+                            key={lead.id}
+                            className={`hover:bg-neutral-50 dark:hover:bg-neutral-900/40 transition-colors ${
+                              lead.status === 'new' ? 'bg-amber-50/20 dark:bg-amber-950/10' : ''
+                            }`}
+                          >
+                            {/* Customer column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="font-semibold text-neutral-900 dark:text-white text-sm">
+                                {lead.clientName}
+                              </div>
+                              <div className="text-neutral-500 text-[11px] mt-0.5 font-mono">
+                                Mã: #{lead.id} · {lead.createdAt}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 mt-2">
+                                <a
+                                  href={`tel:${cleanPhone}`}
+                                  className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                                  title="Gọi điện trực tiếp"
+                                >
+                                  <Phone className="w-3 h-3" />
+                                  <span>{lead.phone}</span>
+                                </a>
+                                <a
+                                  href={`https://zalo.me/${cleanPhone}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300 font-medium hover:bg-blue-100"
+                                >
+                                  Chat Zalo
+                                </a>
+                              </div>
+                            </td>
+
+                            {/* Package column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="font-medium text-neutral-800 dark:text-neutral-200">
+                                {getPackageDetails(lead.packageType).name}
+                              </div>
+                              <div className="text-amber-600 dark:text-amber-400 font-mono font-semibold mt-1">
+                                {formatVND(lead.estimatedPrice)}
+                              </div>
+                              <div className="text-neutral-400 text-[11px] mt-0.5">
+                                Quy mô: {lead.groupSize || '1 - 2 bạn'}
+                              </div>
+                            </td>
+
+                            {/* Date & Location column */}
+                            <td className="py-4 px-4 align-top">
+                              <div className="flex items-center gap-1 font-mono text-neutral-800 dark:text-neutral-200">
+                                <Clock className="w-3 h-3 text-neutral-400" />
+                                <span>{lead.preferredDate || 'Chưa chọn ngày'}</span>
+                              </div>
+                              <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1 line-clamp-2">
+                                {lead.location}
+                              </div>
+                            </td>
+
+                            {/* Status dropdown column */}
+                            <td className="py-4 px-4 align-top">
+                              <select
+                                value={lead.status}
+                                onChange={(e) =>
+                                  onUpdateLeadStatus(lead.id, e.target.value as BookingStatus)
+                                }
+                                className={`px-2 py-1 rounded text-xs font-medium border cursor-pointer ${statusBadge.bg} ${statusBadge.color} ${statusBadge.border}`}
+                              >
+                                <option value="new">Mới Nhận (Cần gọi)</option>
+                                <option value="consulting">Đang Tư Vấn Zalo</option>
+                                <option value="deposited">Đã Cọc / Chốt Lịch</option>
+                                <option value="completed">Đã Chụp & Trả Ảnh</option>
+                                <option value="cancelled">Đã Hủy Lịch</option>
+                              </select>
+                              <div className="text-[10px] text-neutral-400 mt-1 font-mono">
+                                Email gửi: {lead.emailSentTo}
+                              </div>
+                            </td>
+
+                            {/* Consultation Notes column */}
+                            <td className="py-4 px-4 align-top max-w-xs">
+                              {lead.notes ? (
+                                <p className="text-neutral-700 dark:text-neutral-300 text-xs italic line-clamp-2">
+                                  "{lead.notes}"
+                                </p>
+                              ) : (
+                                <span className="text-neutral-400 text-[11px] italic">Chưa có ghi chú</span>
+                              )}
+                              {lead.message && (
+                                <div className="text-neutral-500 text-[11px] mt-1 line-clamp-1">
+                                  Lời nhắn: {lead.message}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Actions column */}
+                            <td className="py-4 px-4 align-top text-right space-x-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingLead(lead);
+                                  setEditNotesText(lead.notes || '');
+                                }}
+                                className="px-2.5 py-1 text-xs rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+                                title="Xem đầy đủ thông tin & thêm ghi chú tư vấn"
+                              >
+                                Tư Vấn
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm(`Bạn có chắc muốn xóa yêu cầu #${lead.id} của khách ${lead.clientName}?`)) {
+                                    onDeleteLead(lead.id);
+                                    triggerCopyToast('Đã xóa yêu cầu thành công');
+                                  }
+                                }}
+                                className="p-1 text-neutral-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                title="Xóa yêu cầu này"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: EMAIL DISPATCH LOGS */}
+        {activeTab === 'emails' && (
+          <div className="space-y-6">
+            {/* Header info */}
+            <div className="p-4 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-serif font-semibold text-neutral-900 dark:text-white">
+                  Hộp Thư Thông Báo Khách Đăng Ký
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Mỗi khi có khách điền form trên website, hệ thống sẽ tự động gửi email thông báo về địa chỉ này.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-500">Email nhận:</span>
+                <input
+                  type="email"
+                  value={photographerEmail}
+                  onChange={(e) => onUpdatePhotographerEmail(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-mono bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Email delivery & activation instruction banner */}
+            <div className="p-4 rounded-xl border border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 text-xs space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-neutral-900 dark:text-white">
+                    Cơ chế gửi kép tự động: Đồng thời lưu Dashboard & gửi email về {photographerEmail}
+                  </h4>
+                  <p className="text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                    Mỗi khi khách hàng điền xong form và bấm gửi yêu cầu:
+                    <br />
+                    • <strong>1. Lưu ngay vào Dashboard:</strong> Thông tin khách, số điện thoại, ngày chụp, gói dịch vụ xuất hiện tức thì trong mục <em>"Khách Đăng Ký"</em> để bạn quản lý, gọi điện, nhắn Zalo và xuất file Excel.
+                    <br />
+                    • <strong>2. Gửi thông báo về Gmail:</strong> Hệ thống tự động kích hoạt gửi trọn bộ thông tin tới <strong>{photographerEmail}</strong> để bạn nhận email và chuông báo trên điện thoại.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-1 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onSendTestEmail}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer shadow-xs"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Gửi Thử 1 Email Thông Báo Tới {photographerEmail}</span>
+                </button>
+                <a
+                  href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(photographerEmail)}&su=${encodeURIComponent('[YÊN VISUALS] Kiểm tra kết nối hòm thư')}&body=${encodeURIComponent('Kiểm tra nhận thông báo lịch chụp kỉ yếu & áo dài thành công!')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Mở Web Gmail Kiểm Tra Hộp Thư</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Email list */}
+            <div className="space-y-3">
+              {emailLogs.length === 0 ? (
+                <div className="p-12 text-center text-neutral-400 border border-neutral-200 dark:border-neutral-800 rounded-xl bg-white dark:bg-[#0c0c0e]">
+                  <Mail className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>Chưa có email thông báo nào. Bấm "Gửi Email Test" ở góc trên để gửi thử một email mẫu!</p>
+                </div>
+              ) : (
+                emailLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] hover:border-amber-400 transition-colors space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                          ĐÃ GỬI TỚI {log.toEmail}
+                        </span>
+                        <span className="text-xs font-mono text-neutral-400">
+                          {log.sentAt} · #{log.id}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setViewingEmailLog(log)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-800 dark:text-neutral-200 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Xem Nội Dung</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleResendEmailDirect(log)}
+                          disabled={sendingEmailId === log.id}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {sendingEmailId === log.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Send className="w-3.5 h-3.5" />
+                          )}
+                          <span>Gửi Lại Tới Gmail</span>
+                        </button>
+
+                        <a
+                          href={`mailto:${log.toEmail}?subject=${encodeURIComponent(log.subject)}&body=${encodeURIComponent(log.fullBody)}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+                          title="Mở ứng dụng mail mặc định trên máy"
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>Ứng Dụng Mail</span>
+                        </a>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-semibold text-neutral-900 dark:text-white">
+                        {log.subject}
+                      </h4>
+                      <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 line-clamp-2 font-mono">
+                        {log.previewSnippet}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: PHOTOS & CONTENT MANAGEMENT */}
+        {activeTab === 'photos' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-serif font-semibold text-neutral-900 dark:text-white">
+                  Kho Tác Phẩm Kỉ Yếu & Áo Dài Trên Website
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Quản lý {photos.length} tác phẩm đang hiển thị ngoài portfolio. Bạn có thể chọn ảnh làm tiêu điểm (featured) hoặc xóa bớt.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onOpenAddPhoto}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold tracking-wider uppercase text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 transition-colors cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tải Thêm Ảnh Mới (Sony A7 III)</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {photos.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] overflow-hidden group space-y-3 p-4"
+                >
+                  <div className="aspect-[4/3] rounded-lg overflow-hidden relative bg-neutral-100 dark:bg-neutral-900">
+                    <img
+                      src={photo.image}
+                      alt={photo.vietnameseTitle}
+                      className="w-full h-full object-cover"
+                    />
+                    {photo.featured && (
+                      <div className="absolute top-3 left-3 px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-amber-500 text-white font-bold shadow-xs">
+                        Ảnh Tiêu Điểm Hero
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
+                      {photo.camera} · {photo.lens}
+                    </div>
+                    <div className="text-sm font-serif font-semibold text-neutral-900 dark:text-white">
+                      {photo.vietnameseTitle}
+                    </div>
+                    <p className="text-xs text-neutral-500 line-clamp-1">
+                      {photo.location}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between text-xs">
+                    <button
+                      type="button"
+                      onClick={() => onToggleFeaturedPhoto(photo.id)}
+                      className={`text-xs font-medium cursor-pointer ${
+                        photo.featured
+                          ? 'text-amber-600 dark:text-amber-400 font-bold'
+                          : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {photo.featured ? '★ Đang là ảnh Hero' : 'Đặt làm ảnh Hero'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Bạn có chắc muốn xóa ảnh "${photo.vietnameseTitle}" khỏi portfolio?`)) {
+                          onDeletePhoto(photo.id);
+                          triggerCopyToast('Đã xóa tác phẩm khỏi trang web');
+                        }
+                      }}
+                      className="text-neutral-400 hover:text-rose-600 transition-colors cursor-pointer"
+                      title="Xóa tác phẩm này"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: SETTINGS & PRICING */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6 max-w-4xl">
+            <div className="p-6 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-6">
+              <div>
+                <h3 className="text-lg font-serif font-semibold text-neutral-900 dark:text-white">
+                  Cài Đặt Hệ Thống & Bảng Giá Dịch Vụ
+                </h3>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Cấu hình hiển thị và giá gói chụp áp dụng cho học sinh, sinh viên trên website.
+                </p>
+              </div>
+
+              {/* Photographer Info */}
+              <div className="space-y-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  1. THÔNG TIN THỢ ẢNH & EMAIL THÔNG BÁO
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <label className="block text-neutral-600 dark:text-neutral-400 mb-1">
+                      Họ tên hiển thị:
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue="Anh Yên"
+                      readOnly
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-neutral-600 dark:text-neutral-400 mb-1">
+                      Email nhận đăng ký form:
+                    </label>
+                    <input
+                      type="email"
+                      value={photographerEmail}
+                      onChange={(e) => onUpdatePhotographerEmail(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-neutral-600 dark:text-neutral-400 mb-1">
+                      Số điện thoại / Zalo tư vấn:
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue="0912 888 266"
+                      readOnly
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-neutral-600 dark:text-neutral-400 mb-1">
+                      Thiết bị chính sử dụng:
+                    </label>
+                    <input
+                      type="text"
+                      defaultValue="Sony Alpha 7 Mark III (ILCE-7M3)"
+                      readOnly
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Service packages summary */}
+              <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  2. CÁC GÓI CHỤP ĐANG CÔNG KHAI TRÊN WEBSITE
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { id: 'aodai-solo', name: 'Áo Dài Nàng Thơ & Cá Nhân', price: '650.000 đ', desc: '1.5 - 2h chụp, hướng dẫn tạo dáng, 15 ảnh chỉnh da' },
+                    { id: 'kiyieu-lop', name: 'Kỉ Yếu Nhóm Bạn Thân (5-15 bạn)', price: '1.200.000 đ', desc: 'Chụp kĩ từng bạn, trả 100% file gốc, 30 ảnh chỉnh màu' },
+                    { id: 'cophuc-heritage', name: 'Áo Dài Cổ Phục & Mùa Thu', price: '850.000 đ', desc: 'Chụp di tích Hoàng Thành, Văn Miếu, tặng mượn nón lá' },
+                    { id: 'photobook-print', name: 'Gói Rửa Ảnh & Set Để Bàn', price: '450.000 đ', desc: 'In 20 ảnh lụa mini + 1 khung ảnh để bàn 15x21cm' },
+                  ].map((p, i) => (
+                    <div key={i} className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-xs space-y-1">
+                      <div className="flex justify-between items-center font-semibold text-neutral-900 dark:text-white">
+                        <span>{p.name}</span>
+                        <span className="font-mono text-amber-600 dark:text-amber-400">{p.price}</span>
+                      </div>
+                      <p className="text-neutral-500">{p.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* MODAL 1: EDIT LEAD NOTES & COUNSELING DETAIL */}
+      {editingLead && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl p-6 space-y-5 animate-in fade-in">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div>
+                <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
+                  Tư Vấn Khách Hàng: {editingLead.clientName}
+                </h3>
+                <p className="text-xs text-neutral-500 font-mono">
+                  Mã #{editingLead.id} · Đăng ký lúc: {editingLead.createdAt}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLead(null)}
+                className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Client summary */}
+            <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-mono">
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Số Điện Thoại / Zalo:</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">{editingLead.phone}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Email:</span>
+                <span className="text-neutral-800 dark:text-neutral-200">{editingLead.email}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Gói Dịch Vụ:</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                  {getPackageDetails(editingLead.packageType).name} ({formatVND(editingLead.estimatedPrice)})
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Ngày & Địa Điểm:</span>
+                <span className="text-neutral-800 dark:text-neutral-200">{editingLead.preferredDate} · {editingLead.location}</span>
+              </div>
+            </div>
+
+            {editingLead.message && (
+              <div className="text-xs space-y-1">
+                <span className="font-semibold text-neutral-700 dark:text-neutral-300">
+                  Lời nhắn / Concept của khách:
+                </span>
+                <p className="p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 text-neutral-700 dark:text-neutral-300 italic border border-amber-200 dark:border-amber-900/40">
+                  "{editingLead.message}"
+                </p>
+              </div>
+            )}
+
+            {/* Quick 1-click Contact Buttons */}
+            <div className="flex items-center gap-2 pt-1">
+              <a
+                href={`tel:${editingLead.phone.replace(/[^0-9]/g, '')}`}
+                className="flex-1 py-2 text-center text-xs font-semibold rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>Gọi Điện</span>
+              </a>
+              <a
+                href={`https://zalo.me/${editingLead.phone.replace(/[^0-9]/g, '')}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 py-2 text-center text-xs font-semibold rounded bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Nhắn Zalo</span>
+              </a>
+              <a
+                href={`mailto:${editingLead.email}?subject=Yên Visuals tư vấn lịch chụp kỉ yếu & áo dài`}
+                className="flex-1 py-2 text-center text-xs font-semibold rounded bg-neutral-800 hover:bg-neutral-700 text-white flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Gửi Mail</span>
+              </a>
+            </div>
+
+            {/* Edit Notes Field */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+                Ghi chú tư vấn nội bộ (Lịch hẹn, thỏa thuận concept, địa điểm đón xe):
+              </label>
+              <textarea
+                rows={3}
+                value={editNotesText}
+                onChange={(e) => setEditNotesText(e.target.value)}
+                placeholder="Ví dụ: Đã gọi khách, hẹn 7:30 sáng thứ Bảy tại cổng trường Chu Văn An, chuẩn bị 2 nón lá..."
+                className="w-full p-3 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 dark:text-white focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setEditingLead(null)}
+                className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md cursor-pointer"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveNotes}
+                className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md cursor-pointer shadow-xs"
+              >
+                Lưu Ghi Chú
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: FULL EMAIL LOG PREVIEW */}
+      {viewingEmailLog && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-2xl shadow-2xl p-6 space-y-4 animate-in fade-in max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <div>
+                <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
+                  Chi Tiết Email Thông Báo Gửi Về
+                </h3>
+                <p className="text-xs text-neutral-500 font-mono">
+                  Gửi tới: {viewingEmailLog.toEmail} · {viewingEmailLog.sentAt}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingEmailLog(null)}
+                className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-1 font-mono text-xs">
+              <div className="text-neutral-500">TIÊU ĐỀ:</div>
+              <div className="font-semibold text-neutral-900 dark:text-white p-2 bg-neutral-100 dark:bg-neutral-900 rounded">
+                {viewingEmailLog.subject}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto font-mono text-xs p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap">
+              {viewingEmailLog.fullBody}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(viewingEmailLog.fullBody);
+                  triggerCopyToast('Đã sao chép toàn bộ nội dung email!');
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 text-neutral-700 dark:text-neutral-300 font-medium cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Sao Chép Nội Dung</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingEmailLog(null)}
+                  className="px-4 py-1.5 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded cursor-pointer"
+                >
+                  Đóng
+                </button>
+                <a
+                  href={`mailto:${viewingEmailLog.toEmail}?subject=${encodeURIComponent(viewingEmailLog.subject)}&body=${encodeURIComponent(viewingEmailLog.fullBody)}`}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Mở Trình Mail Thật</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: MANUAL LEAD CREATION */}
+      {isAddLeadModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <form
+            onSubmit={handleCreateManualLeadSubmit}
+            className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl p-6 space-y-4 animate-in fade-in"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
+              <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
+                Thêm Yêu Cầu Khách Hàng Thủ Công
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddLeadModalOpen(false)}
+                className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-neutral-700 dark:text-neutral-300 mb-1 font-medium">
+                  Tên khách hàng / Đại diện lớp *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: Hoàng Mai Linh (Lớp 12D Phan Đình Phùng)"
+                  value={newLeadForm.clientName}
+                  onChange={(e) => setNewLeadForm({ ...newLeadForm, clientName: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 dark:text-neutral-300 mb-1 font-medium">
+                    Số điện thoại / Zalo *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="0912..."
+                    value={newLeadForm.phone}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-700 dark:text-neutral-300 mb-1">Email</label>
+                  <input
+                    type="email"
+                    placeholder="mail@gmail.com"
+                    value={newLeadForm.email}
+                    onChange={(e) => setNewLeadForm({ ...newLeadForm, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-700 dark:text-neutral-300 mb-1 font-medium">
+                    Gói chụp
+                  </label>
+                  <select
+                    value={newLeadForm.packageType}
+                    onChange={(e) =>
+                      setNewLeadForm({
+                        ...newLeadForm,
+                        packageType: e.target.value as BookingLead['packageType'],
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                  >
+                    <option value="aodai-solo">Áo Dài Nàng Thơ (650k)</option>
+                    <option value="kiyieu-lop">Kỉ Yếu Nhóm Bạn (1.200k)</option>
+                    <option value="cophuc-heritage">Áo Dài Cổ Phục (850k)</option>
+                    <option value="photobook-print">Gói Rửa Ảnh (450k)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-neutral-700 dark:text-neutral-300 mb-1">
+                    Ngày dự kiến
+                  </label>
+                  <input
+                    type="date"
+                    value={newLeadForm.preferredDate}
+                    onChange={(e) =>
+                      setNewLeadForm({ ...newLeadForm, preferredDate: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 dark:text-neutral-300 mb-1">
+                  Địa điểm mong muốn
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Phan Đình Phùng, Hoàng Thành, Sân trường..."
+                  value={newLeadForm.location}
+                  onChange={(e) => setNewLeadForm({ ...newLeadForm, location: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-700 dark:text-neutral-300 mb-1">
+                  Ghi chú tư vấn ban đầu
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Khách nhắn qua Zalo, thích phong cách nhẹ nhàng..."
+                  value={newLeadForm.notes}
+                  onChange={(e) => setNewLeadForm({ ...newLeadForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setIsAddLeadModalOpen(false)}
+                className="px-4 py-2 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded shadow-xs"
+              >
+                Tạo Yêu Cầu
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+};

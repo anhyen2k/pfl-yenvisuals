@@ -1,0 +1,281 @@
+{
+  "entities": {
+    "BookingLead": {
+      "title": "BookingLead",
+      "description": "Customer inquiry and booking registration for photoshoot",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique booking identifier",
+          "maxLength": 64
+        },
+        "clientName": {
+          "type": "string",
+          "description": "Customer or group leader name",
+          "maxLength": 200
+        },
+        "email": {
+          "type": "string",
+          "description": "Customer email address for correspondence",
+          "maxLength": 200
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer contact phone or Zalo number",
+          "maxLength": 30
+        },
+        "packageType": {
+          "type": "string",
+          "description": "Selected photoshoot package identifier",
+          "maxLength": 64
+        },
+        "preferredDate": {
+          "type": "string",
+          "description": "Expected photoshoot date",
+          "maxLength": 30
+        },
+        "location": {
+          "type": "string",
+          "description": "Photoshoot location",
+          "maxLength": 200
+        },
+        "groupSize": {
+          "type": "string",
+          "description": "Expected number of participants",
+          "maxLength": 100
+        },
+        "message": {
+          "type": "string",
+          "description": "Customer notes, concepts, or questions",
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "description": "Workflow status of the booking lead",
+          "enum": ["new", "consulting", "deposited", "completed", "cancelled"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Admin internal notes",
+          "maxLength": 2000
+        },
+        "source": {
+          "type": "string",
+          "description": "Source of booking lead",
+          "maxLength": 50
+        },
+        "estimatedPrice": {
+          "type": "number",
+          "description": "Estimated cost in VND"
+        },
+        "emailSentTo": {
+          "type": "string",
+          "description": "Studio recipient email",
+          "maxLength": 200
+        },
+        "emailSentAt": {
+          "type": "string",
+          "description": "Timestamp when email notification was dispatched",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the booking was submitted",
+          "maxLength": 50
+        }
+      },
+      "required": ["clientName", "email", "phone", "packageType", "preferredDate"]
+    },
+    "EmailNotificationLog": {
+      "title": "EmailNotificationLog",
+      "description": "Log of email dispatch alerts sent for customer inquiries",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique log identifier",
+          "maxLength": 64
+        },
+        "leadId": {
+          "type": "string",
+          "description": "Associated booking lead ID",
+          "maxLength": 64
+        },
+        "toEmail": {
+          "type": "string",
+          "description": "Recipient email",
+          "maxLength": 200
+        },
+        "fromEmail": {
+          "type": "string",
+          "description": "Sender label or email",
+          "maxLength": 200
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject of the email alert",
+          "maxLength": 300
+        },
+        "sentAt": {
+          "type": "string",
+          "description": "Sent timestamp",
+          "maxLength": 50
+        },
+        "previewSnippet": {
+          "type": "string",
+          "description": "Short excerpt of the email",
+          "maxLength": 500
+        },
+        "fullBody": {
+          "type": "string",
+          "description": "Full formatted email content",
+          "maxLength": 5000
+        },
+        "status": {
+          "type": "string",
+          "description": "Dispatch delivery status",
+          "enum": ["delivered", "pending"]
+        }
+      },
+      "required": ["leadId", "toEmail", "subject", "sentAt"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized administrator document",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Photographer admin email address",
+          "maxLength": 200
+        },
+        "role": {
+          "type": "string",
+          "description": "User permission role",
+          "maxLength": 50
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "PortfolioPhoto": {
+      "title": "PortfolioPhoto",
+      "description": "Curated photoshoot photograph in the portfolio gallery",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique photo identifier",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "English/general title of the photograph",
+          "maxLength": 200
+        },
+        "vietnameseTitle": {
+          "type": "string",
+          "description": "Vietnamese title of the photograph",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "description": "Photography category code",
+          "maxLength": 64
+        },
+        "year": {
+          "type": "string",
+          "description": "Year of photo session",
+          "maxLength": 10
+        },
+        "location": {
+          "type": "string",
+          "description": "Session location",
+          "maxLength": 200
+        },
+        "camera": {
+          "type": "string",
+          "description": "Camera model used (e.g. Sony Alpha 7 Mark III)",
+          "maxLength": 100
+        },
+        "lens": {
+          "type": "string",
+          "description": "Camera lens used (e.g. FE 85mm f/1.4 GM)",
+          "maxLength": 100
+        },
+        "focalLength": {
+          "type": "string",
+          "description": "Focal length setting",
+          "maxLength": 20
+        },
+        "aperture": {
+          "type": "string",
+          "description": "Aperture value (e.g. f/1.4)",
+          "maxLength": 20
+        },
+        "shutterSpeed": {
+          "type": "string",
+          "description": "Shutter speed (e.g. 1/500s)",
+          "maxLength": 20
+        },
+        "iso": {
+          "type": "number",
+          "description": "ISO sensitivity rating"
+        },
+        "description": {
+          "type": "string",
+          "description": "Short description of the photo",
+          "maxLength": 1000
+        },
+        "story": {
+          "type": "string",
+          "description": "Background story or artistic inspiration",
+          "maxLength": 3000
+        },
+        "image": {
+          "type": "string",
+          "description": "Image URL or asset path",
+          "maxLength": 50000
+        },
+        "aspectRatio": {
+          "type": "string",
+          "description": "Aspect ratio format",
+          "maxLength": 20
+        },
+        "orientation": {
+          "type": "string",
+          "description": "Display orientation",
+          "maxLength": 20
+        },
+        "featured": {
+          "type": "string",
+          "description": "Whether photo is featured"
+        },
+        "conceptNote": {
+          "type": "string",
+          "description": "Concept notes",
+          "maxLength": 1000
+        }
+      },
+      "required": ["title", "category", "location", "camera", "lens", "image"]
+    }
+  },
+  "firestore": {
+    "/booking_leads/{leadId}": {
+      "schema": "BookingLead",
+      "description": "Collection of all photoshoot booking inquiries and client leads"
+    },
+    "/email_logs/{logId}": {
+      "schema": "EmailNotificationLog",
+      "description": "Collection of dispatched email logs for tracking and auditing"
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "List of authorized administrator user documents"
+    },
+    "/portfolio_photos/{photoId}": {
+      "schema": "PortfolioPhoto",
+      "description": "Collection of portfolio photos with edit and delete capabilities for admin"
+    }
+  }
+}
