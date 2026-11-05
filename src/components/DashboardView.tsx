@@ -71,6 +71,146 @@ interface DashboardViewProps {
   onGoogleLogin?: () => void;
 }
 
+/* ---- Helpers nội bộ cho Dashboard (chỉ dùng trong file này) ---- */
+
+// Ngày hôm nay theo giờ địa phương (Hà Nội), dạng YYYY-MM-DD.
+// Không dùng todayISO() UTC của portfolioLogic vì ở Hà Nội 0h–7h sáng
+// ngày UTC vẫn là hôm trước, sẽ lệch 1 ngày cho "quá hạn / sắp chụp".
+function todayLocalISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// createdAt được lưu dạng chuỗi vi-VN "HH:mm, DD/MM/YYYY" (xem createBookingLead),
+// không sort trực tiếp được nên parse ra timestamp; chuỗi ISO vẫn parse được,
+// chuỗi lạ thì fallback Date.parse, cuối cùng là 0 (giữ nguyên thứ tự gốc).
+function parseCreatedAtMs(value: string): number {
+  if (!value) return 0;
+  const m = value.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?[^0-9]*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    const [, hh, mm, ss, dd, mo, yyyy] = m;
+    return new Date(
+      Number(yyyy),
+      Number(mo) - 1,
+      Number(dd),
+      Number(hh),
+      Number(mm),
+      Number(ss || 0)
+    ).getTime();
+  }
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+// Tiền còn lại: ưu tiên trường balance đã lưu, fallback đúng công thức
+// đã dùng ở bảng + calculateDashboardStats: estimatedPrice - paidAmount.
+function leadBalance(lead: BookingLead): number {
+  return lead.balance ?? Math.max(0, (lead.estimatedPrice || 0) - (lead.paidAmount || 0));
+}
+
+// SĐT chuẩn hoá cho tel:/zalo.me: chỉ giữ số, đầu 84 -> 0 (như normalizePhone).
+function leadPhoneDigits(phone: string): string {
+  let digits = (phone || '').replace(/[^0-9]/g, '');
+  if (digits.startsWith('84')) digits = '0' + digits.slice(2);
+  return digits;
+}
+
+// Quá hạn gọi lại: có hẹn gọi lại trước hôm nay và vẫn đang chờ tư vấn.
+function isOverdueFollowUp(lead: BookingLead, today: string): boolean {
+  return Boolean(
+    lead.nextFollowUpAt &&
+      lead.nextFollowUpAt < today &&
+      (lead.status === 'new' || lead.status === 'consulting')
+  );
+}
+
+// Cần gọi (hẹn gọi lại đến hôm nay trở về trước, vẫn đang chờ tư vấn).
+// Tương đương filter 'due-today' của portfolioLogic, nhưng so với ngày địa phương.
+function isDueCall(lead: BookingLead, today: string): boolean {
+  return Boolean(
+    lead.nextFollowUpAt &&
+      lead.nextFollowUpAt <= today &&
+      (lead.status === 'new' || lead.status === 'consulting')
+  );
+}
+
+// Chưa cọc: số tiền đã trả ít hơn tiền cọc theo gói, đơn chưa hủy.
+function isUnpaidDeposit(lead: BookingLead): boolean {
+  return lead.status !== 'cancelled' && (lead.paidAmount || 0) < (lead.depositAmount || 0);
+}
+
+// Sắp chụp trong 7 ngày: ngày chụp từ hôm nay đến hôm nay + 7 ngày,
+// đơn chưa hủy và chưa hoàn thành (đã chụp xong thì không còn "sắp chụp").
+function isShootingSoon(lead: BookingLead, today: string): boolean {
+  if (!lead.preferredDate || lead.status === 'cancelled' || lead.status === 'completed') {
+    return false;
+  }
+  return lead.preferredDate >= today && lead.preferredDate <= addDaysISO(today, 7);
+}
+
+// Sắp chụp trong 7 ngày mà chưa cọc.
+function isShootingSoonUnpaid(lead: BookingLead, today: string): boolean {
+  return isShootingSoon(lead, today) && isUnpaidDeposit(lead);
+}
+
+// Chưa trả ảnh: ngày chụp đã tới/quá mà chưa có link Drive, đơn chưa hủy.
+// (Trạng thái 'completed' nghĩa là "Đã Chụp & Trả Ảnh" nên chỉ tính đơn
+// chưa hoàn thành; đơn tương lai chưa chụp thì chưa đến lúc trả ảnh.)
+function isUndeliveredPhotos(lead: BookingLead, today: string): boolean {
+  return (
+    lead.status !== 'cancelled' &&
+    lead.status !== 'completed' &&
+    Boolean(lead.preferredDate) &&
+    lead.preferredDate <= today &&
+    !(lead.driveLink || '').trim()
+  );
+}
+
+// Việc cần làm hôm nay: cần gọi lại, hoặc sắp chụp chưa cọc, hoặc chưa trả ảnh.
+function isTodoLead(lead: BookingLead, today: string): boolean {
+  return (
+    isDueCall(lead, today) || isShootingSoonUnpaid(lead, today) || isUndeliveredPhotos(lead, today)
+  );
+}
+
+// Tìm kiếm nội bộ (thay cho phần search của filterLeads vì filterLeads
+// không tìm theo mã đơn): tên, SĐT (cả dạng có/không có khoảng trắng,
+// đầu 84 hay 0), mã đơn KY-... (cả khi gõ thiếu dấu "-"), email, địa điểm,
+// ghi chú, lời nhắn.
+function matchesLeadSearch(lead: BookingLead, query: string): boolean {
+  const q = query.toLowerCase().trim();
+  if (!q) return true;
+  const qDigits = q.replace(/[^0-9]/g, '');
+  const qFlat = q.replace(/[\s-]/g, '');
+  const haystacks = [
+    lead.clientName,
+    lead.phone,
+    lead.email,
+    lead.location,
+    lead.notes || '',
+    lead.message || '',
+    lead.id,
+  ].map((s) => (s || '').toLowerCase());
+  if (haystacks.some((h) => h.includes(q))) return true;
+  if (haystacks.some((h) => h.replace(/[\s-]/g, '').includes(qFlat) && qFlat.length > 0)) {
+    return true;
+  }
+  if (qDigits.length >= 3 && leadPhoneDigits(lead.phone).includes(qDigits)) return true;
+  return false;
+}
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   leads,
   onUpdateLeadStatus,
@@ -94,6 +234,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [activeTab, setActiveTab] = useState<'leads' | 'emails' | 'photos' | 'settings'>('leads');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // (a) Sắp xếp đơn: mặc định mới nhất trước.
+  const [sortBy, setSortBy] = useState<'created-desc' | 'created-asc' | 'shoot-date' | 'balance-desc'>('created-desc');
 
   // Selected lead for detail/notes modal
   const [editingLead, setEditingLead] = useState<BookingLead | null>(null);
@@ -131,29 +273,97 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
 
   const stats = calculateDashboardStats(leads, photos.length);
-  const filteredLeads = filterLeads(leads, statusFilter, searchQuery);
-  const dueTodayCount = filterLeads(leads, 'due-today', '').length;
+
+  // (c)(d)(e) Các nhóm đơn cần chú ý — tính theo ngày địa phương (Hà Nội).
+  const todayStr = todayLocalISO();
+  const dueTodayCount = leads.filter((l) => isDueCall(l, todayStr)).length;
+  const shootingSoonCount = leads.filter((l) => isShootingSoon(l, todayStr)).length;
+  const noDepositCount = leads.filter((l) => isUnpaidDeposit(l)).length;
+  const noPhotosCount = leads.filter((l) => isUndeliveredPhotos(l, todayStr)).length;
+  const todoCallCount = dueTodayCount;
+  const todoSoonUnpaidCount = leads.filter((l) => isShootingSoonUnpaid(l, todayStr)).length;
+  const todoNoPhotoCount = noPhotosCount;
+  const todoCount = leads.filter((l) => isTodoLead(l, todayStr)).length;
+
+  // (a)(b)(c) Lọc + tìm kiếm + sắp xếp — làm tại đây (không sửa portfolioLogic):
+  // filterLeads chỉ biết các trạng thái gốc và không tìm theo mã đơn KY-...,
+  // nên các bộ lọc riêng ('due-today' theo ngày địa phương, 'shooting-7d',
+  // 'no-deposit', 'no-photos', 'todo') lọc trực tiếp, còn trạng thái gốc
+  // vẫn qua filterLeads với search rỗng; tìm kiếm (kể cả mã đơn) áp dụng
+  // sau bằng matchesLeadSearch; cuối cùng sắp xếp theo sortBy.
+  const baseLeads: BookingLead[] =
+    statusFilter === 'due-today'
+      ? leads.filter((l) => isDueCall(l, todayStr))
+      : statusFilter === 'shooting-7d'
+        ? leads.filter((l) => isShootingSoon(l, todayStr))
+        : statusFilter === 'no-deposit'
+          ? leads.filter((l) => isUnpaidDeposit(l))
+          : statusFilter === 'no-photos'
+            ? leads.filter((l) => isUndeliveredPhotos(l, todayStr))
+            : statusFilter === 'todo'
+              ? leads.filter((l) => isTodoLead(l, todayStr))
+              : filterLeads(leads, statusFilter, '');
+  const searchedLeads = baseLeads.filter((l) => matchesLeadSearch(l, searchQuery));
+  const filteredLeads = [...searchedLeads].sort((a, b) => {
+    switch (sortBy) {
+      case 'created-asc':
+        return parseCreatedAtMs(a.createdAt) - parseCreatedAtMs(b.createdAt);
+      case 'shoot-date': {
+        // Ngày chụp gần nhất trước; đơn chưa chọn ngày xếp cuối.
+        const da = a.preferredDate || '9999-12-31';
+        const db = b.preferredDate || '9999-12-31';
+        return da < db ? -1 : da > db ? 1 : 0;
+      }
+      case 'balance-desc':
+        return leadBalance(b) - leadBalance(a);
+      case 'created-desc':
+      default:
+        return parseCreatedAtMs(b.createdAt) - parseCreatedAtMs(a.createdAt);
+    }
+  });
 
   const triggerCopyToast = (msg: string) => {
     setCopiedNotification(msg);
     setTimeout(() => setCopiedNotification(null), 2500);
   };
 
+  // (f) Sao chép mã đơn KY-... (có fallback khi clipboard API không khả dụng).
+  const handleCopyBookingCode = async (lead: BookingLead) => {
+    try {
+      await navigator.clipboard.writeText(lead.id);
+      triggerCopyToast(`Đã sao chép mã đơn ${lead.id}`);
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = lead.id;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        triggerCopyToast(`Đã sao chép mã đơn ${lead.id}`);
+      } catch {
+        triggerCopyToast(`Mã đơn: ${lead.id} (không sao chép được tự động)`);
+      }
+    }
+  };
+
   const [sendingEmailId, setSendingEmailId] = useState<string | null>(null);
 
+  // (g) Xuất Excel/CSV chỉ các đơn ĐANG LỌC (filteredLeads đã gồm
+  // trạng thái + tìm kiếm + sắp xếp), không phải toàn bộ danh sách.
   const handleExportExcel = () => {
     try {
-      const excelBytes = exportLeadsToExcel(leads);
+      const excelBytes = exportLeadsToExcel(filteredLeads);
       const blob = new Blob([excelBytes.buffer as ArrayBuffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `Danh-sach-khach-hang-YenVisuals-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.download = `Danh-sach-khach-hang-YenPhoto-${new Date().toISOString().slice(0, 10)}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
-      triggerCopyToast('Đã xuất file Excel (.xlsx) thành công!');
+      triggerCopyToast(`Đã xuất file Excel (.xlsx) ${filteredLeads.length} đơn đang lọc!`);
     } catch (err) {
       console.error('Export Excel error', err);
       triggerCopyToast('Lỗi xuất Excel, vui lòng thử lại');
@@ -161,15 +371,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handleExportCsv = () => {
-    const csvContent = exportLeadsToCsv(leads);
+    const csvContent = exportLeadsToCsv(filteredLeads);
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Danh-sach-khach-hang-YenVisuals-${Date.now().toString().slice(-4)}.csv`;
+    link.download = `Danh-sach-khach-hang-YenPhoto-${Date.now().toString().slice(-4)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-    triggerCopyToast('Đã tải xuống file CSV thành công!');
+    triggerCopyToast(`Đã tải xuống file CSV ${filteredLeads.length} đơn đang lọc!`);
   };
 
   const handleResendEmailDirect = async (log: EmailNotificationLog) => {
@@ -314,7 +524,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-serif font-bold text-base tracking-wide text-neutral-900 dark:text-white">
-                  YÊN VISUALS
+                  YÊN PHOTO
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 font-semibold border border-amber-300 dark:border-amber-800">
                   DASHBOARD QUẢN TRỊ
@@ -473,6 +683,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
+        {/* (e) Việc cần làm hôm nay — bấm vào thẻ thì lọc danh sách xuống đúng các đơn đó */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('leads');
+            setStatusFilter((prev) => (prev === 'todo' ? 'all' : 'todo'));
+          }}
+          title="Bấm để lọc danh sách xuống các đơn cần làm hôm nay (bấm lại để bỏ lọc)"
+          className={`w-full text-left p-5 rounded-xl border transition-colors cursor-pointer space-y-2 ${
+            statusFilter === 'todo'
+              ? 'border-rose-400 dark:border-rose-700 bg-rose-50 dark:bg-rose-950/30 ring-1 ring-rose-400 dark:ring-rose-700'
+              : 'border-rose-300 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20 hover:border-rose-400 dark:hover:border-rose-700'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-mono text-rose-700 dark:text-rose-400 font-medium">
+              <AlertCircle className="w-4 h-4 text-rose-500" />
+              <span>VIỆC CẦN LÀM HÔM NAY {statusFilter === 'todo' ? '· ĐANG LỌC' : ''}</span>
+            </div>
+            <span className="text-2xl sm:text-3xl font-serif font-bold text-rose-700 dark:text-rose-300 tabular-nums">
+              {todoCount}
+            </span>
+          </div>
+          <div className="text-[11px] text-rose-700 dark:text-rose-400">
+            Cần gọi lại: <span className="font-mono font-semibold">{todoCallCount} đơn</span>
+            {' · '}Sắp chụp chưa cọc: <span className="font-mono font-semibold">{todoSoonUnpaidCount} đơn</span>
+            {' · '}Chưa trả ảnh: <span className="font-mono font-semibold">{todoNoPhotoCount} đơn</span>
+            <span className="text-neutral-500 dark:text-neutral-400"> (một đơn có thể thuộc nhiều nhóm, số tổng đếm mỗi đơn 1 lần)</span>
+          </div>
+        </button>
+
         {/* Navigation Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-2">
           <div className="flex items-center gap-1 sm:gap-2 bg-neutral-200/60 dark:bg-neutral-800/60 p-1 rounded-lg">
@@ -540,20 +781,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               type="button"
               onClick={handleExportExcel}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-800 rounded-md transition-colors cursor-pointer shadow-xs"
-              title="Xuất dữ liệu khách ra file Excel (.xlsx)"
+              title={`Xuất ${filteredLeads.length} đơn đang lọc ra file Excel (.xlsx)`}
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Xuất File Excel (.xlsx)</span>
+              <span>Xuất File Excel ({filteredLeads.length} đơn đang lọc)</span>
             </button>
 
             <button
               type="button"
               onClick={handleExportCsv}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white border border-neutral-200 dark:border-neutral-800 rounded-md transition-colors cursor-pointer"
-              title="Tải bản dự phòng CSV"
+              title={`Tải bản dự phòng CSV — chỉ ${filteredLeads.length} đơn đang lọc`}
             >
               <Download className="w-3 h-3" />
-              <span className="hidden md:inline">CSV</span>
+              <span className="hidden md:inline">CSV ({filteredLeads.length} đơn đang lọc)</span>
             </button>
 
             <button
@@ -578,12 +819,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
                 <input
                   type="text"
-                  placeholder="Tìm theo tên khách, SĐT, trường học, địa điểm..."
+                  placeholder="Tìm theo tên khách, SĐT, mã đơn KY-..., trường học, địa điểm..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 text-xs bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-hidden focus:ring-1 focus:ring-amber-500 dark:text-white"
                 />
               </div>
+
+              {/* (a) Sắp xếp đơn */}
+              <label className="flex items-center gap-2 text-xs text-neutral-500 shrink-0">
+                <span className="whitespace-nowrap">Sắp xếp:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(
+                      e.target.value as 'created-desc' | 'created-asc' | 'shoot-date' | 'balance-desc'
+                    )
+                  }
+                  className="px-2 py-2 text-xs bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md dark:text-white cursor-pointer"
+                  title="Sắp xếp danh sách đơn đang hiển thị"
+                >
+                  <option value="created-desc">Mới nhất trước</option>
+                  <option value="created-asc">Cũ nhất trước</option>
+                  <option value="shoot-date">Ngày chụp gần nhất</option>
+                  <option value="balance-desc">Tiền còn lại nhiều nhất</option>
+                </select>
+              </label>
 
               {/* Status filter tabs */}
               <div className="flex items-center gap-1 overflow-x-auto pb-1 text-xs">
@@ -595,6 +856,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   { id: 'deposited', label: 'Đã Cọc' },
                   { id: 'completed', label: 'Đã Chụp' },
                   { id: 'cancelled', label: 'Đã Hủy' },
+                  { id: 'todo', label: 'Việc cần làm' },
+                  { id: 'shooting-7d', label: 'Sắp chụp ≤ 7 ngày' },
+                  { id: 'no-deposit', label: 'Chưa cọc' },
+                  { id: 'no-photos', label: 'Chưa trả ảnh' },
                 ].map((s) => (
                   <button
                     key={s.id}
@@ -610,6 +875,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {s.id === 'due-today' && dueTodayCount > 0 && (
                       <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
                         {dueTodayCount}
+                      </span>
+                    )}
+                    {s.id === 'todo' && todoCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-mono">
+                        {todoCount}
+                      </span>
+                    )}
+                    {s.id === 'shooting-7d' && shootingSoonCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                        {shootingSoonCount}
+                      </span>
+                    )}
+                    {s.id === 'no-deposit' && noDepositCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                        {noDepositCount}
+                      </span>
+                    )}
+                    {s.id === 'no-photos' && noPhotosCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                        {noPhotosCount}
                       </span>
                     )}
                   </button>
@@ -646,13 +931,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     ) : (
                       filteredLeads.map((lead) => {
                         const statusBadge = formatStatusLabel(lead.status);
-                        const cleanPhone = lead.phone.replace(/[^0-9]/g, '');
+                        const cleanPhone = leadPhoneDigits(lead.phone);
+                        // (d) Đơn quá hạn gọi lại / sắp chụp chưa cọc.
+                        const isOverdue = isOverdueFollowUp(lead, todayStr);
+                        const isSoonUnpaid = isShootingSoonUnpaid(lead, todayStr);
 
                         return (
                           <tr
                             key={lead.id}
                             className={`hover:bg-neutral-50 dark:hover:bg-neutral-900/40 transition-colors ${
-                              lead.status === 'new' ? 'bg-amber-50/20 dark:bg-amber-950/10' : ''
+                              isOverdue
+                                ? 'bg-rose-50 dark:bg-rose-950/20'
+                                : lead.status === 'new'
+                                  ? 'bg-amber-50/20 dark:bg-amber-950/10'
+                                  : ''
                             }`}
                           >
                             {/* Customer column */}
@@ -660,8 +952,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <div className="font-semibold text-neutral-900 dark:text-white text-sm">
                                 {lead.clientName}
                               </div>
-                              <div className="text-neutral-500 text-[11px] mt-0.5 font-mono">
-                                Mã: #{lead.id} · {lead.createdAt}
+                              <div className="flex flex-wrap items-center gap-1.5 text-neutral-500 text-[11px] mt-0.5 font-mono">
+                                <span>
+                                  Mã: #{lead.id} · {lead.createdAt}
+                                </span>
+                                {/* (f) Sao chép mã đơn */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyBookingCode(lead)}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                                  title={`Sao chép mã đơn ${lead.id}`}
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>Sao chép mã</span>
+                                </button>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 mt-2">
                                 <a
@@ -705,6 +1009,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1 line-clamp-2">
                                 {lead.location}
                               </div>
+                              {/* (d) Sắp chụp trong 7 ngày mà chưa cọc */}
+                              {isSoonUnpaid && (
+                                <div className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                  <AlertCircle className="w-3 h-3" />
+                                  <span>Sắp chụp chưa cọc</span>
+                                </div>
+                              )}
                             </td>
 
                             {/* Time slot column */}
@@ -713,8 +1024,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 {timeSlotLabel(lead.timeSlot) || 'Chưa chọn'}
                               </div>
                               {lead.nextFollowUpAt && (
-                                <div className="text-amber-600 dark:text-amber-400 text-[11px] mt-1 font-mono whitespace-nowrap">
+                                <div
+                                  className={`text-[11px] mt-1 font-mono whitespace-nowrap ${
+                                    isOverdue
+                                      ? 'text-rose-600 dark:text-rose-400 font-semibold'
+                                      : 'text-amber-600 dark:text-amber-400'
+                                  }`}
+                                >
                                   Hẹn gọi: {lead.nextFollowUpAt}
+                                  {/* (d) Quá hạn gọi lại */}
+                                  {isOverdue && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                      Quá hạn
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -867,6 +1190,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                             {/* Actions column */}
                             <td className="py-4 px-4 align-top text-right space-x-1">
+                              {/* (f) Nút nhanh: gọi / Zalo / sao chép mã / mở Drive (chỉ khi có dữ liệu) */}
+                              <div className="flex items-center justify-end gap-1 mb-1.5">
+                                <a
+                                  href={`tel:${cleanPhone}`}
+                                  className="p-1.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                                  title={`Gọi ${lead.phone}`}
+                                >
+                                  <Phone className="w-3.5 h-3.5" />
+                                </a>
+                                <a
+                                  href={`https://zalo.me/${cleanPhone}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1.5 rounded bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                                  title={`Nhắn Zalo ${lead.phone}`}
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyBookingCode(lead)}
+                                  className="p-1.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                                  title={`Sao chép mã đơn ${lead.id}`}
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                                {lead.driveLink && (
+                                  <a
+                                    href={lead.driveLink}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="p-1.5 rounded bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/50 transition-colors"
+                                    title="Mở link Drive trả ảnh"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
+                              </div>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -957,7 +1318,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span>Gửi Thử 1 Email Thông Báo Tới {photographerEmail}</span>
                 </button>
                 <a
-                  href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(photographerEmail)}&su=${encodeURIComponent('[YÊN VISUALS] Kiểm tra kết nối hòm thư')}&body=${encodeURIComponent('Kiểm tra nhận thông báo lịch chụp kỉ yếu & áo dài thành công!')}`}
+                  href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(photographerEmail)}&su=${encodeURIComponent('[YÊN PHOTO] Kiểm tra kết nối hòm thư')}&body=${encodeURIComponent('Kiểm tra nhận thông báo lịch chụp kỉ yếu & áo dài thành công!')}`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 transition-colors"
@@ -1295,7 +1656,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span>Nhắn Zalo</span>
               </a>
               <a
-                href={`mailto:${editingLead.email}?subject=Yên Visuals tư vấn lịch chụp kỉ yếu & áo dài`}
+                href={`mailto:${editingLead.email}?subject=Yên Photo tư vấn lịch chụp kỉ yếu & áo dài`}
                 className="flex-1 py-2 text-center text-xs font-semibold rounded bg-neutral-800 hover:bg-neutral-700 text-white flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Mail className="w-3.5 h-3.5" />

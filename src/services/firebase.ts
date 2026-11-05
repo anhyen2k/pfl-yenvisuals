@@ -16,6 +16,7 @@ import {
   updateDoc,
   onSnapshot,
   getDocs,
+  getDoc,
   query,
   orderBy,
   getDocFromServer,
@@ -25,6 +26,7 @@ import {
   ref,
   uploadBytes,
   getDownloadURL,
+  deleteObject,
 } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
@@ -67,7 +69,9 @@ export async function uploadPhotoToStorage(file: File, photoId: string): Promise
     }
     bitmap.close();
   }
-  const ext = file.type === 'image/png' ? 'png' : 'jpg';
+  // Phan mo rong theo dinh dang that cua blob sau khi nen (anh nen ra JPEG
+  // thi phai la .jpg, khong duoc ghi .png nhu file goc).
+  const ext = blob.type === 'image/png' ? 'png' : 'jpg';
   const storageRef = ref(storage, `portfolio_photos/${photoId}.${ext}`);
   await uploadBytes(storageRef, blob);
   return getDownloadURL(storageRef);
@@ -186,7 +190,7 @@ export function subscribeToBookingLeads(
     (error) => {
       console.error('Failed to listen to booking leads:', error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, path);
+      // KHONG throw trong callback onSnapshot: loi se thanh uncaught exception.
     }
   );
 }
@@ -260,7 +264,7 @@ export function subscribeToEmailLogs(
     (error) => {
       console.error('Failed to listen to email logs:', error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, path);
+      // KHONG throw trong callback onSnapshot: loi se thanh uncaught exception.
     }
   );
 }
@@ -343,9 +347,29 @@ export function subscribeToPortfolioPhotos(
     (error) => {
       console.warn('Portfolio photos subscription warning:', error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, path);
+      // KHONG throw trong callback onSnapshot: loi se thanh uncaught exception.
     }
   );
+}
+
+/**
+ * Xoá file gốc trên Firebase Storage khi xoá ảnh (tránh file mồ côi).
+ * Chỉ xử lý URL Storage thật; ảnh SVG mẫu / URL ngoài thì bỏ qua.
+ * File đã mất trước đó thì coi như xoá xong, không throw.
+ */
+export async function deletePhotoFromStorage(imageUrl: string): Promise<void> {
+  if (
+    !imageUrl ||
+    (!imageUrl.includes('firebasestorage.googleapis.com') && !imageUrl.startsWith('gs://'))
+  ) {
+    return;
+  }
+  try {
+    await deleteObject(ref(storage, imageUrl));
+  } catch (err: any) {
+    if (err?.code === 'storage/object-not-found') return;
+    throw err;
+  }
 }
 
 /**
@@ -362,6 +386,24 @@ export async function seedPortfolioPhotosIfEmpty(initialPhotos: PhotoItem[]): Pr
     }
   } catch (error) {
     console.warn('Seed photos check warning:', error);
+  }
+}
+
+/**
+ * Seed cac anh mau con thieu len Cloud (chi admin goi, xem App).
+ * Khac seedPortfolioPhotosIfEmpty (chi chay khi collection rong): ham nay
+ * them tung anh mau chua co, nen anh Yen them truoc do khong bi mat va
+ * anh mau cung khong bien mat khoi gallery khi cloud da co anh.
+ * Chi chay 1 lan / trinh duyet (co localStorage o App) de khong hoi sinh
+ * anh Yen da chu dong xoa.
+ */
+export async function seedMissingPortfolioPhotos(initialPhotos: PhotoItem[]): Promise<void> {
+  const path = 'portfolio_photos';
+  for (const photo of initialPhotos) {
+    const snap = await getDoc(doc(db, path, photo.id));
+    if (!snap.exists()) {
+      await setDoc(doc(db, path, photo.id), photo);
+    }
   }
 }
 

@@ -23,6 +23,15 @@ import { Lock } from 'lucide-react';
 import { INITIAL_PHOTOS, PHOTO_SERIES } from './data/portfolioData';
 import { SITE_CONFIG } from './config/site';
 import {
+  BOOKING_PATH,
+  navigateToSection,
+  normalizePath,
+  pathForHash,
+  photoIdForHash,
+  scrollToSectionId,
+  sectionIdForPath,
+} from './utils/cleanPaths';
+import {
   PhotoItem,
   PhotoCategory,
   filterPhotos,
@@ -48,6 +57,8 @@ import {
   savePhotoToCloud,
   updatePhotoInCloud,
   deletePhotoFromCloud,
+  deletePhotoFromStorage,
+  seedMissingPortfolioPhotos,
   subscribeToPortfolioPhotos,
   logoutUser,
   auth,
@@ -142,6 +153,80 @@ export default function App() {
   // Modal states
   const [selectedPhotoForLightbox, setSelectedPhotoForLightbox] = useState<PhotoItem | null>(null);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
+
+  // --- Clean paths (Vercel, không dùng react-router) ---
+  // /tac-pham -> #gallery, /bo-suu-tap -> #series, /ve-toi -> #about,
+  // /lien-he -> #contact, /dat-lich -> mở BookingModal, / -> trang chủ.
+  // Link cũ #about vẫn chạy: đổi thành /ve-toi rồi cuộn tới mục.
+  const lastPathBeforeBookingRef = React.useRef<string>('/');
+  const applyRoute = React.useCallback((path: string, hash: string) => {
+    const cleanPath = normalizePath(path);
+    if (hash) {
+      const mapped = pathForHash(hash);
+      if (mapped) {
+        window.history.replaceState(null, '', mapped);
+        const sectionId = sectionIdForPath(mapped);
+        if (sectionId) {
+          window.setTimeout(() => scrollToSectionId(sectionId), 150);
+          return;
+        }
+      }
+    }
+    if (cleanPath === BOOKING_PATH) {
+      setCurrentView('portfolio');
+      setIsBookingOpen(true);
+      return;
+    }
+    const sectionId = sectionIdForPath(cleanPath);
+    if (sectionId) {
+      setCurrentView('portfolio');
+      // Cuộn sau khi render; thử lại 1 lần vì ảnh/Gallery có thể render chậm.
+      window.setTimeout(() => {
+        if (!scrollToSectionId(sectionId)) {
+          window.setTimeout(() => scrollToSectionId(sectionId), 500);
+        }
+      }, 150);
+      return;
+    }
+    if (cleanPath === '/') {
+      setIsBookingOpen(false);
+    }
+  }, []);
+
+  // Anh mo tu link chia se #photo-<id> (Lightbox copy link): mo thang
+  // lightbox khi load trang. Dung ref de khong phu thuoc vong doi effect.
+  const photosRef = React.useRef<PhotoItem[]>(photos);
+  photosRef.current = photos;
+  useEffect(() => {
+    const id = photoIdForHash(window.location.hash);
+    if (!id) return;
+    const found =
+      photosRef.current.find((p) => p.id === id) ||
+      INITIAL_PHOTOS.find((p) => p.id === id);
+    if (found) setSelectedPhotoForLightbox(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Áp dụng đường dẫn khi load trang lần đầu + khi bấm Back/Forward.
+  useEffect(() => {
+    applyRoute(window.location.pathname, window.location.hash);
+    const onPopState = () => applyRoute(window.location.pathname, window.location.hash);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyRoute]);
+
+  // Đồng bộ URL với BookingModal: mở modal -> /dat-lich, đóng -> về đường dẫn trước đó.
+  useEffect(() => {
+    if (isBookingOpen) {
+      if (window.location.pathname !== BOOKING_PATH) {
+        lastPathBeforeBookingRef.current = window.location.pathname;
+        window.history.pushState(null, '', BOOKING_PATH);
+      }
+    } else if (window.location.pathname === BOOKING_PATH) {
+      window.history.replaceState(null, '', lastPathBeforeBookingRef.current || '/');
+    }
+  }, [isBookingOpen]);
+
   const [isAddPhotoOpen, setIsAddPhotoOpen] = useState(false);
   const [isProofingOpen, setIsProofingOpen] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
@@ -187,10 +272,39 @@ export default function App() {
           localStorage.setItem('yen_admin_auth', 'true');
           localStorage.setItem('yen_admin_google_email', user.email || '');
         } catch {}
+      } else if (user) {
+        // Tai khoan Google khac dang nhap (vd: khach bam nut Google): khong
+        // duoc giu quyen admin tu phien truoc, ha xuong guest.
+        setUserRole('guest');
+        try {
+          localStorage.removeItem('yen_admin_auth');
+          localStorage.removeItem('yen_admin_google_email');
+        } catch {}
       }
     });
     return () => unsubAuth();
   }, [photographerEmail]);
+
+  // Seed anh mau con thieu len Cloud ngay khi admin dang nhap: neu khong,
+  // chi can cloud co 1 anh (Yen them anh that dau tien) la subscription se
+  // thay toan bo 12 anh mau bang moi anh do. Chi chay 1 lan / trinh duyet
+  // (co localStorage) de khong hoi sinh anh Yen da chu dong xoa.
+  const photoSeededRef = React.useRef(false);
+  useEffect(() => {
+    if (userRole !== 'admin' || !currentUser || photoSeededRef.current) return;
+    if (localStorage.getItem('yen_photo_seed_v1')) {
+      photoSeededRef.current = true;
+      return;
+    }
+    photoSeededRef.current = true;
+    seedMissingPortfolioPhotos(INITIAL_PHOTOS)
+      .then(() => {
+        try {
+          localStorage.setItem('yen_photo_seed_v1', 'done');
+        } catch {}
+      })
+      .catch((e) => console.warn('Seed portfolio photos warning:', e));
+  }, [currentUser, userRole]);
 
   const handleAdminLoginSuccess = () => {
     setUserRole('admin');
@@ -331,8 +445,18 @@ export default function App() {
   };
 
   const handleSaveEditedPhoto = (updatedPhoto: PhotoItem) => {
+    // Neu anh nay duoc ghim featured thi bo ghim cac anh khac (ca local lan
+    // Cloud) — truoc day chi luu anh nay nen Firestore co the co nhieu anh
+    // cung featured, Hero se lay anh dau tien mot cach kho doan.
+    const previouslyFeatured = updatedPhoto.featured
+      ? photos.filter((p) => p.featured && p.id !== updatedPhoto.id)
+      : [];
     setPhotos((prev) => {
-      const updated = prev.map((p) => (p.id === updatedPhoto.id ? updatedPhoto : p));
+      const updated = prev.map((p) => {
+        if (p.id === updatedPhoto.id) return updatedPhoto;
+        if (updatedPhoto.featured && p.featured) return { ...p, featured: false };
+        return p;
+      });
       localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
       return updated;
     });
@@ -345,6 +469,12 @@ export default function App() {
       reportSyncError('Lưu ảnh lên đám mây thất bại, ảnh chỉ mới lưu trên máy này. Vui lòng kiểm tra mạng / đăng nhập Google rồi thử lại.');
       console.warn('Cloud Firestore photo update error:', err);
     });
+    if (previouslyFeatured.length > 0) {
+      Promise.all(previouslyFeatured.map((p) => updatePhotoInCloud(p.id, { featured: false }))).catch((err) => {
+        reportSyncError('Bỏ ghim ảnh nổi bật cũ trên đám mây thất bại, vui lòng thử lại.');
+        console.warn('Cloud Firestore photo unfeature error:', err);
+      });
+    }
   };
 
   const handleRequestDeletePhoto = (photoId: string) => {
@@ -355,6 +485,7 @@ export default function App() {
   };
 
   const handleConfirmDeletePhoto = (photoId: string) => {
+    const target = photos.find((p) => p.id === photoId);
     setPhotos((prev) => {
       const updated = prev.filter((p) => p.id !== photoId);
       localStorage.setItem('portfolio_all_photos', JSON.stringify(updated));
@@ -369,6 +500,13 @@ export default function App() {
       reportSyncError('Xoá ảnh trên đám mây thất bại, ảnh có thể vẫn còn trên máy khác. Vui lòng thử lại.');
       console.warn('Cloud Firestore photo delete error:', err);
     });
+
+    // Xoá luôn file gốc trên Storage (nếu là ảnh đã upload) để khỏi để file mồ côi.
+    if (target?.image) {
+      deletePhotoFromStorage(target.image).catch((err) =>
+        console.warn('Cloud Storage photo file delete warning:', err)
+      );
+    }
   };
 
   const handleAddCustomPhoto = (newPhoto: PhotoItem) => {
@@ -488,17 +626,19 @@ export default function App() {
   };
 
   const handleUpdateLeadNotes = (leadId: string, notes: string) => {
+    const target = leads.find((l) => l.id === leadId);
+    // Khong co don nay thi dung: truoc day van goi saveBookingLeadToCloud
+    // voi object chi co {id, notes} nen tao ra document rac tren Firestore.
+    if (!target) return;
     setLeads((prev) => {
       const updated = prev.map((l) => (l.id === leadId ? { ...l, notes } : l));
       localStorage.setItem('yen_portfolio_leads', JSON.stringify(updated));
       return updated;
     });
     // Update notes in Firestore
-    saveBookingLeadToCloud({
-      ...(leads.find((l) => l.id === leadId) || {}),
-      id: leadId,
-      notes,
-    } as BookingLead).catch((e) => console.warn('Firestore updateNotes error', e));
+    saveBookingLeadToCloud({ ...target, notes }).catch((e) =>
+      console.warn('Firestore updateNotes error', e)
+    );
   };
 
   const handleDeleteLead = (leadId: string) => {
@@ -596,7 +736,7 @@ export default function App() {
     localStorage.setItem('yen_photographer_email', email);
   };
 
-  const featuredPhoto = photos.find((p) => p.featured) || photos[0];
+  const featuredPhoto = photos.find((p) => p.featured) || photos[0] || INITIAL_PHOTOS[0];
   const unreadLeadsCount = leads.filter((l) => l.status === 'new').length;
 
   return (
@@ -703,10 +843,7 @@ export default function App() {
             {/* Split Screen Hero Section */}
             <Hero
               featuredPhoto={featuredPhoto}
-              onExploreGallery={() => {
-                const el = document.getElementById('gallery');
-                el?.scrollIntoView({ behavior: 'smooth' });
-              }}
+              onExploreGallery={() => navigateToSection('gallery')}
               onSelectPhoto={(photo) => setSelectedPhotoForLightbox(photo)}
               onOpenBooking={() => setIsBookingOpen(true)}
             />
@@ -733,7 +870,7 @@ export default function App() {
             />
 
             {/* Curated Monographs & Exhibitions Series */}
-            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} />
+            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} photos={photos} />
 
             {/* About the Artist & In My Camera Bag Gear */}
             <AboutSection />

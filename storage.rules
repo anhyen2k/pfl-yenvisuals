@@ -1,5 +1,5 @@
 rules_version = '2';
-// Firebase Storage cho Yen Visuals.
+// Firebase Storage cho Yen Photo.
 // - Khach xem duoc anh portfolio (public read).
 // - Chi admin (Google anhyenk26@gmail.com) moi duoc upload / xoa anh.
 // Deploy rieng file nay len Firebase (khong tu len theo code web):

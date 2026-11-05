@@ -327,7 +327,7 @@ function createAoDaiArtSvg(
   const svgString = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
       ${content}
-      <text x="30" y="570" font-family="'Plus Jakarta Sans', sans-serif" font-size="11" font-weight="500" fill="#ffffff" letter-spacing="1" opacity="0.85">YÊN VISUALS · ${title.toUpperCase()}</text>
+      <text x="30" y="570" font-family="'Plus Jakarta Sans', sans-serif" font-size="11" font-weight="500" fill="#ffffff" letter-spacing="1" opacity="0.85">YÊN PHOTO · ${title.toUpperCase()}</text>
     </svg>
   `.trim();
 
@@ -644,7 +644,7 @@ export const PHOTO_SERIES: PhotoSeries[] = [
     vietnameseTitle: 'Gửi Thời Niên Thiếu: Kỉ Yếu & Áo Cử Nhân',
     year: '2025 - 2026',
     coverImage: createAoDaiArtSvg('kiyieu-grad-caps', 'Series Gửi Thời Niên Thiếu'),
-    photoCount: 4,
+    photoCount: 5,
     description: 'Trọn vẹn cảm xúc mùa bế giảng: từ tà áo dài trắng thướt tha sân trường, ném mũ cử nhân rạng rỡ, đến những giờ ra chơi hoài niệm.',
     curatorNote: 'Thực hiện cùng các thế hệ học sinh sinh viên THPT Chu Văn An, Phan Đình Phùng, ĐHQG Hà Nội.',
     location: 'Hà Nội & Các Giảng Đường',
@@ -655,7 +655,7 @@ export const PHOTO_SERIES: PhotoSeries[] = [
     vietnameseTitle: 'Hương Sắc Hà Thành: Áo Dài Mùa Thu Phố Cổ',
     year: '2025 - 2026',
     coverImage: createAoDaiArtSvg('aodai-phandinhphung', 'Series Áo Dài Thu Hà Nội'),
-    photoCount: 3,
+    photoCount: 2,
     description: 'Dạo bước trên những con đường ngập lá vàng rơi Phan Đình Phùng, Hoàng Diệu, Bờ Hồ cùng tà áo dài lụa bay mềm mại.',
     curatorNote: 'Bộ ảnh tôn vinh nét duyên dáng, e ấp đặc trưng của người con gái Tràng An.',
     location: 'Phan Đình Phùng & Phố Cổ',

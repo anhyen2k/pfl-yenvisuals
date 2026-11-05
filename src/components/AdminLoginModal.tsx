@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Lock, X, AlertCircle } from 'lucide-react';
-import { loginWithGoogle } from '../services/firebase';
+import { loginWithGoogle, logoutUser } from '../services/firebase';
 import { SITE_CONFIG } from '../config/site';
 
 interface AdminLoginModalProps {
@@ -31,12 +31,18 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setErrorMsg(null);
     try {
       const user = await loginWithGoogle();
-      if (user) {
-        localStorage.setItem('yen_admin_auth', 'true');
-        localStorage.setItem('yen_admin_login_time', new Date().toISOString());
-        localStorage.setItem('yen_admin_google_email', user.email || '');
-        onLoginSuccess();
+      // Chi dung email quan tri moi duoc vao Dashboard: truoc day bat ky
+      // tai khoan Google nao dang nhap xong cung goi onLoginSuccess() va
+      // thanh admin. Kiem tra ngay tai day, sai email thi dang xuat luon.
+      const signedEmail = (user?.email || '').toLowerCase();
+      if (!user || signedEmail !== photographerEmail.toLowerCase()) {
+        await logoutUser().catch(() => {});
+        setErrorMsg(
+          `Tài khoản Google ${user?.email || '(không rõ email)'} không phải tài khoản quản trị. Chỉ ${photographerEmail} mới vào được trang quản trị.`
+        );
+        return;
       }
+      onLoginSuccess();
     } catch (err: any) {
       console.warn('Google sign-in:', err);
       // Nguoi dung tu dong popup thi khong hien loi; cac loi khac hien ma loi
@@ -46,7 +52,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       } else if (err?.code) {
         const guidanceByCode: Record<string, string> = {
           'auth/unauthorized-domain':
-            'Domain anhyen2k.github.io chưa được thêm vào Firebase Authentication > Settings > Authorized domains.',
+            'Domain pfl-yenphoto.vercel.app chưa được thêm vào Firebase Authentication > Settings > Authorized domains.',
           'auth/operation-not-allowed':
             'Chưa bật đăng nhập Google trong Firebase Authentication > Sign-in method.',
           'auth/popup-blocked':
@@ -114,8 +120,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           )}
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center">
-            Chi tai khoan Google <strong className="text-neutral-800 dark:text-neutral-200">{SITE_CONFIG.photographerEmail}</strong> moi
-            vao duoc trang quan tri.
+            Chỉ tài khoản Google <strong className="text-neutral-800 dark:text-neutral-200">{SITE_CONFIG.photographerEmail}</strong> mới
+            vào được trang quản trị.
           </p>
 
           {/* Google Sign In Button */}
@@ -143,7 +149,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span>{isGoogleLoading ? 'Dang Dang Nhap Google...' : `Dang Nhap Voi Google (${SITE_CONFIG.photographerEmail})`}</span>
+            <span>{isGoogleLoading ? 'Đang đăng nhập Google...' : `Đăng nhập với Google (${SITE_CONFIG.photographerEmail})`}</span>
           </button>
 
           <button
@@ -151,7 +157,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             onClick={onClose}
             className="w-full py-2 px-4 bg-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium text-xs rounded-lg transition-colors cursor-pointer mt-1"
           >
-            Tro ve giao dien xem anh danh cho khach
+            Trở về giao diện xem ảnh dành cho khách
           </button>
         </div>
 

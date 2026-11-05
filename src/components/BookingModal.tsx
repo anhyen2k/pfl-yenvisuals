@@ -63,6 +63,11 @@ function maxGroupCount(packageType: BookingInquiry['packageType']): number {
   return packageType === 'kiyieu-lop' ? 30 : 2;
 }
 
+function minGroupCount(packageType: BookingInquiry['packageType']): number {
+  // Goi kiyieu nhom ap dung tu 5 ban (ten goi "5 - 15 ban"); cac goi khac tu 1.
+  return packageType === 'kiyieu-lop' ? 5 : 1;
+}
+
 function resolveLocation(
   locationChoice: string,
   schoolName: string,
@@ -165,7 +170,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       const current = prev.groupCount ?? defaultGroupCount(prev.packageType);
       const next = Math.min(
         maxGroupCount(prev.packageType),
-        Math.max(1, current + delta)
+        Math.max(minGroupCount(prev.packageType), current + delta)
       );
       return { ...prev, groupCount: next, groupSize: `${next} bạn` };
     });
@@ -213,7 +218,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       id: bookingId,
       createdAt: now,
       status: 'new',
-      notes: 'Yêu cầu từ form web Yên Visuals',
+      notes: 'Yêu cầu từ form web Yên Photo',
       source: 'web_form',
       estimatedPrice,
       depositAmount,
@@ -390,9 +395,15 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 <Mail className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>{submittedBooking.emailStatusMsg}</span>
               </div>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">
-                Anh Yên sẽ nhắn Zalo nhắc lịch trước 1 ngày.
-              </p>
+              {submittedBooking.inquiry.packageType !== 'photobook-print' ? (
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Anh Yên sẽ nhắn Zalo nhắc lịch trước 1 ngày.
+                </p>
+              ) : (
+                <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Anh Yên sẽ nhắn Zalo báo khi ảnh in xong.
+                </p>
+              )}
             </div>
 
             {/* Voucher Card */}
@@ -593,7 +604,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 </label>
                 <input
                   type="tel"
-                  placeholder="Vd: 0987 654 321 hoặc 01212320"
+                  placeholder={`Vd: ${SITE_CONFIG.phoneDisplay}`}
                   value={formData.phone}
                   onChange={(e) => {
                     setFormData({ ...formData, phone: e.target.value });
@@ -770,7 +781,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       type="button"
                       aria-label="Giảm số người"
                       onClick={() => handleGroupCountChange(-1)}
-                      disabled={groupCount <= 1}
+                      disabled={groupCount <= minGroupCount(formData.packageType)}
                       className="w-8 h-8 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:border-amber-500 cursor-pointer"
                     >
                       −
@@ -793,13 +804,16 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       ? 'Nhóm 5–15 bạn giá gốc 1.200k; vượt 15 người tính thêm 80k/người vượt.'
                       : 'Tối đa 2 bạn cho gói này.'}
                   </p>
+                  {errors.groupSize && (
+                    <p className="text-[11px] text-rose-500 mt-1">{errors.groupSize}</p>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Tổng tiền ước tính + cọc 30% live */}
-            {!isPhotobook && (
-              <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-mono">
+            {/* Tổng tiền ước tính + cọc 30% live — hien cho ca goi photobook
+                (man hinh xac nhan sau do cung hien coc, khong duoc giau o form). */}
+            <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-mono">
                 <div className="flex justify-between items-center">
                   <span className="text-neutral-500">TỔNG TIỀN ƯỚC TÍNH</span>
                   <span className="text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</span>
@@ -817,8 +831,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     Đã tính thêm {(groupCount - 15) * 80000}đ cho {groupCount - 15} người vượt 15 người (80k/người).
                   </p>
                 )}
-              </div>
-            )}
+            </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">

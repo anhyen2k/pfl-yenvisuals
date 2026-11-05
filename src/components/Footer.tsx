@@ -31,47 +31,15 @@ export const Footer: React.FC<FooterProps> = ({
           <div className="flex items-center gap-2.5">
             <Camera className="w-5 h-5 text-neutral-900 dark:text-white" />
             <span className="font-serif font-semibold text-lg tracking-wider text-neutral-900 dark:text-white uppercase">
-              YÊN VISUALS
+              YÊN PHOTO
             </span>
             <span className="text-neutral-400 font-mono text-[11px]">· PHOTOGRAPHY ARCHIVE</span>
           </div>
 
-          {/* Social Links */}
-          <div className="flex items-center gap-6 font-mono text-xs">
-            <a
-              href="https://instagram.com"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-neutral-900 dark:hover:text-white transition-colors"
-            >
-              Instagram
-            </a>
-            <a
-              href="https://behance.net"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-neutral-900 dark:hover:text-white transition-colors"
-            >
-              Behance
-            </a>
-            <a
-              href="https://vsco.co"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-neutral-900 dark:hover:text-white transition-colors"
-            >
-              VSCO
-            </a>
-            <a
-              href="https://500px.com"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-neutral-900 dark:hover:text-white transition-colors"
-            >
-              500px
-            </a>
-          </div>
-
+          {/* Link mang xa hoi: TAM AN — cac link truoc day chi tro ve trang
+              chu chung instagram.com / behance.net / vsco.co / 500px.com,
+              khong phai tai khoan cua Yen. Yen cung cap handle that thi them
+              lai o day. */}
           {/* Back to top */}
           <button
             type="button"
@@ -86,7 +54,7 @@ export const Footer: React.FC<FooterProps> = ({
 
         <div className="pt-6 border-t border-neutral-100 dark:border-neutral-800/80 flex flex-col md:flex-row items-center justify-between gap-3 text-neutral-400 font-mono text-[11px]">
           <div>
-            © 2026 Yên Nguyễn Visuals. Mọi quyền được bảo lưu. Kỉ yếu & Áo dài Hà Nội.
+            © 2026 Yên Photo. Mọi quyền được bảo lưu. Kỉ yếu & Áo dài Hà Nội.
           </div>
 
           {/* Admin Entry or Active Admin Status */}

@@ -126,7 +126,10 @@ export const ClientProofingModal: React.FC<ClientProofingModalProps> = ({
 
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
-    const code = pinCode.trim();
+    // Chuan hoa ve chu hoa: input co class uppercase chi doi hien thi, gia tri
+    // go that co the la chu thuong — khong chuan hoa thi khoa localStorage
+    // theo ma don se lech nhau giua cac lan nhap KY-... / ky-....
+    const code = pinCode.trim().toUpperCase();
     if (!isValidProofingCode(code)) {
       setCodeError('Mã không đúng định dạng, mã đơn bắt đầu bằng KY-...');
       return;
@@ -178,7 +181,7 @@ export const ClientProofingModal: React.FC<ClientProofingModalProps> = ({
   const handleExportList = async () => {
     const selected = proofs.filter((p) => p.selected);
     const summary = [
-      `=== DANH SÁCH ẢNH ĐÃ DUYỆT - YÊN VISUALS ===`,
+      `=== DANH SÁCH ẢNH ĐÃ DUYỆT - YÊN PHOTO ===`,
       `Mã đơn / mã buổi: ${orderCode}`,
       `Số lượng ảnh chọn: ${selected.length}/${proofs.length}`,
       `Thời gian: ${new Date().toLocaleDateString('vi-VN')}`,

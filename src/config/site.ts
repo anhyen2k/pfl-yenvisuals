@@ -1,4 +1,4 @@
-// Cau hinh chung duy nhat cho Yen Visuals — chi lam o Ha Noi.
+// Cau hinh chung duy nhat cho Yen Photo — chi lam o Ha Noi.
 // Doi email / SDT o day thi doi o 1 cho, khong can sua rac khap code.
 export const SITE_CONFIG = {
   photographerName: 'Anh Yên',
@@ -7,7 +7,8 @@ export const SITE_CONFIG = {
   phoneDisplay: '0912 888 266',
   zaloUrl: 'https://zalo.me/0912888266',
   city: 'Hà Nội',
-  siteUrl: 'https://anhyen2k.github.io/pfl-yenvisuals/',
+  siteUrl: 'https://pfl-yenphoto.vercel.app/',
+  brandName: 'Yên Photo',
 } as const;
 
 export function generateZaloUrl(phone: string): string {

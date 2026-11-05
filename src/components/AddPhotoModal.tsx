@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { X, Upload, Image as ImageIcon, Camera, Plus, Check } from 'lucide-react';
 import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { PHOTO_SERIES } from '../data/portfolioData';
 import { uploadPhotoToStorage } from '../services/firebase';
 
 interface AddPhotoModalProps {
@@ -35,6 +36,10 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [description, setDescription] = useState('');
   const [story, setStory] = useState('');
   const [tags, setTags] = useState('kỉ yếu, áo dài trắng, thanh xuân, sony a7 mark 3');
+  const [seriesId, setSeriesId] = useState('');
+  // Huong / ti le that cua anh vua chon (mac dinh landscape 4:3).
+  const [orientation, setOrientation] = useState<PhotoItem['orientation']>('landscape');
+  const [aspectRatio, setAspectRatio] = useState<PhotoItem['aspectRatio']>('4:3');
   const [error, setError] = useState('');
   // File goc nguoi dung chon — chi dung de preview (base64) va upload len Storage.
   // KHONG luu base64 vao Firestore nua.
@@ -53,6 +58,26 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       // Giu File goc de upload len Storage khi submit; preview base64 chi de xem truoc.
       setSelectedFile(file);
       setImageUrlInput('');
+      // Doc kich thuoc that cua anh de dat dung orientation / aspectRatio
+      // (truoc day moi anh them moi deu bi gan landscape 4:3, anh doc bi hien sai khung).
+      const probe = new Image();
+      probe.onload = () => {
+        const ratio = probe.naturalWidth / Math.max(1, probe.naturalHeight);
+        if (ratio < 0.9) {
+          setOrientation('portrait');
+          setAspectRatio('3:4');
+        } else if (ratio < 1.15) {
+          setOrientation('square');
+          setAspectRatio('1:1');
+        } else if (ratio < 1.5) {
+          setOrientation('landscape');
+          setAspectRatio('4:3');
+        } else {
+          setOrientation('landscape');
+          setAspectRatio('16:9');
+        }
+      };
+      probe.src = URL.createObjectURL(file);
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -68,6 +93,38 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     setImagePreview('');
     setSelectedFile(null);
     setImageUrlInput('');
+  };
+
+  // Reset toan bo form: modal giu state khi dong (khong unmount) nen khong
+  // reset thi lan mo sau van hien du lieu anh cu.
+  const resetForm = () => {
+    setTitle('');
+    setVietnameseTitle('');
+    setCategory('aodai-trang');
+    setImagePreview('');
+    setImageUrlInput('');
+    setLocation('Hà Nội, Việt Nam');
+    setYear('2026');
+    setCamera('Sony A7 Mark III');
+    setLens('Sony FE 85mm f/1.8');
+    setFocalLength('85mm');
+    setAperture('f/1.8');
+    setShutterSpeed('1/1000s');
+    setIso(100);
+    setDescription('');
+    setStory('');
+    setTags('kỉ yếu, áo dài trắng, thanh xuân, sony a7 mark 3');
+    setSeriesId('');
+    setOrientation('landscape');
+    setAspectRatio('4:3');
+    setError('');
+    setSelectedFile(null);
+    setIsUploading(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   const handleUrlApply = () => {
@@ -131,13 +188,15 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       description: description.trim() || 'Tác phẩm mới được thêm vào bộ sưu tập cá nhân.',
       story: story.trim() || description.trim(),
       image: imageUrl,
-      aspectRatio: '4:3',
-      orientation: 'landscape',
+      aspectRatio,
+      orientation,
+      seriesId: seriesId || undefined,
       tags: tagArray.length > 0 ? tagArray : ['portfolio', 'tác phẩm mới'],
       edition: 'Bộ ảnh kỉ yếu & áo dài',
     };
 
     onAddPhoto(newPhoto);
+    resetForm();
     onClose();
   };
 
@@ -164,7 +223,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 text-neutral-400 hover:text-neutral-900 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -289,6 +348,25 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
             </div>
             <div>
               <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Bộ sưu tập (Series) — tùy chọn
+              </label>
+              <select
+                value={seriesId}
+                onChange={(e) => setSeriesId(e.target.value)}
+                className="w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden"
+              >
+                <option value="">Không thuộc bộ nào</option>
+                {PHOTO_SERIES.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.vietnameseTitle}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Năm chụp & Địa điểm
               </label>
               <div className="grid grid-cols-3 gap-2">
@@ -389,7 +467,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
             >
               Hủy

@@ -77,7 +77,7 @@ export const Gallery: React.FC<GalleryProps> = ({
   const buildFavoritesMessage = (): string => {
     const lines = favoritePhotos.map((photo) => `- ${photo.vietnameseTitle} (ID: ${photo.id})`);
     return [
-      `Chào ${SITE_CONFIG.photographerName}, em gửi danh sách ảnh yêu thích từ Yên Visuals:`,
+      `Chào ${SITE_CONFIG.photographerName}, em gửi danh sách ảnh yêu thích từ Yên Photo:`,
       ...lines,
       '',
       'Nhờ Anh tư vấn giúp em nhé!',
@@ -211,7 +211,7 @@ export const Gallery: React.FC<GalleryProps> = ({
               className="px-2.5 py-1 text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 rounded-md flex items-center gap-1.5 hover:opacity-80 transition-opacity"
             >
               <Heart className="w-3.5 h-3.5 fill-rose-500" />
-              <span>Đang lọc ảnh yêu thích ({favoriteIds.length})</span>
+              <span>Đang lọc ảnh yêu thích ({photos.length})</span>
               <X className="w-3 h-3 ml-0.5" />
             </button>
           )}
@@ -242,11 +242,13 @@ export const Gallery: React.FC<GalleryProps> = ({
         </div>
       </div>
 
-      {/* Chia se danh sach yeu thich — chi hien khi co anh yeu thich */}
-      {favoriteIds.length > 0 && (
+      {/* Chia se danh sach yeu thich — chi hien khi co anh yeu thich trong
+          danh sach dang hien thi (dung so luong that se gui, khong dung tong
+          favoriteIds vi co the bi loc boi category/series). */}
+      {favoritePhotos.length > 0 && (
         <div className="pb-6 flex flex-wrap items-center gap-2">
           <span className="text-xs text-neutral-500 dark:text-neutral-400">
-            Danh sách yêu thích ({favoriteIds.length} ảnh):
+            Danh sách yêu thích ({favoritePhotos.length} ảnh):
           </span>
           <button
             type="button"

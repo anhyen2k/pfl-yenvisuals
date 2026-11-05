@@ -5,9 +5,10 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    // GitHub Project Pages: site is served under /pfl-yenvisuals/, not root.
-    // Without this, built assets point to /assets/... and 404.
-    base: '/pfl-yenvisuals/',
+    // Vercel: site is served at the domain root (https://pfl-yenphoto.vercel.app/).
+    // Do NOT use '/pfl-yenvisuals/' here — that base was only for GitHub Project Pages.
+    // This build must NOT be uploaded to GitHub Pages.
+    base: '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

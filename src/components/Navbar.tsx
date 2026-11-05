@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Camera, Sun, Moon, Plus, Menu, X, Heart, ShieldCheck, Mail, Lock, LogOut, Crown } from 'lucide-react';
 import { UserRole } from '../utils/portfolioLogic';
+import { navigateHome, navigateToSection } from '../utils/cleanPaths';
 
 interface NavbarProps {
   darkMode: boolean;
@@ -48,17 +49,19 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand wordmark */}
         <a
-          href="#"
+          href="/"
           onClick={(e) => {
+            e.preventDefault();
             if (currentView === 'dashboard') {
-              e.preventDefault();
               onToggleView();
+            } else {
+              navigateHome();
             }
           }}
           className="group flex items-center gap-2.5 text-lg font-serif tracking-widest text-neutral-900 dark:text-neutral-100 uppercase whitespace-nowrap shrink-0 hover:opacity-80 transition-opacity"
         >
           <Camera className="w-5 h-5 text-neutral-800 dark:text-neutral-200 transition-transform group-hover:rotate-12" />
-          <span className="font-semibold text-lg sm:text-xl tracking-wider">YÊN VISUALS</span>
+          <span className="font-semibold text-lg sm:text-xl tracking-wider">YÊN PHOTO</span>
         </a>
 
         {/* Zone 2: Navigation links (for guests or admin preview) */}
@@ -66,19 +69,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           {currentView === 'portfolio' ? (
             <>
               <a
-                href="#gallery"
+                href="/tac-pham"
+                onClick={(e) => { e.preventDefault(); navigateToSection('gallery'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Tác Phẩm
               </a>
               <a
-                href="#series"
+                href="/bo-suu-tap"
+                onClick={(e) => { e.preventDefault(); navigateToSection('series'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Bộ Ảnh Triển Lãm
               </a>
               <a
-                href="#about"
+                href="/ve-toi"
+                onClick={(e) => { e.preventDefault(); navigateToSection('about'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Về Tác Giả & Thiết Bị
@@ -92,7 +98,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Khu Vực Khách Hàng</span>
               </button>
               <a
-                href="#contact"
+                href="/lien-he"
+                onClick={(e) => { e.preventDefault(); navigateToSection('contact'); }}
                 className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
               >
                 Liên Hệ
@@ -270,22 +277,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Standard Navigation Links */}
           <a
-            href="#gallery"
-            onClick={() => setMobileMenuOpen(false)}
+            href="/tac-pham"
+            onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('gallery'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Tác Phẩm
           </a>
           <a
-            href="#series"
-            onClick={() => setMobileMenuOpen(false)}
+            href="/bo-suu-tap"
+            onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('series'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Bộ Ảnh Triển Lãm
           </a>
           <a
-            href="#about"
-            onClick={() => setMobileMenuOpen(false)}
+            href="/ve-toi"
+            onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('about'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Về Tác Giả & Thiết Bị
@@ -302,8 +309,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ShieldCheck className="w-4 h-4 text-neutral-400" />
           </button>
           <a
-            href="#contact"
-            onClick={() => setMobileMenuOpen(false)}
+            href="/lien-he"
+            onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigateToSection('contact'); }}
             className="block px-3 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-md"
           >
             Liên Hệ

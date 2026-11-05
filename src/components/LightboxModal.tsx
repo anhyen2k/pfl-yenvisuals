@@ -13,11 +13,7 @@ import {
   ZoomOut,
   Info,
   Share2,
-  Download,
   Camera,
-  MapPin,
-  Calendar,
-  Layers,
   Check,
   Pencil,
   Trash2,
@@ -80,9 +76,12 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
 
   if (!photo) return null;
 
-  const currentIndex = allPhotos.findIndex((p) => p.id === photo.id);
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < allPhotos.length - 1;
+  // Anh mo tu Hero co the khong nam trong danh sach dang loc (displayedPhotos)
+  // -> findIndex = -1. Dung vi tri 0 de hien thi / dieu huong thay vi "0 / N".
+  const foundIndex = allPhotos.findIndex((p) => p.id === photo.id);
+  const currentIndex = foundIndex === -1 ? 0 : foundIndex;
+  const hasPrev = foundIndex > 0;
+  const hasNext = allPhotos.length > 0 && currentIndex < allPhotos.length - 1;
 
   const handlePrev = () => {
     if (hasPrev) {
@@ -91,15 +90,40 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
   };
 
   const handleNext = () => {
+    // Anh dang xem khong nam trong danh sach loc: "tiep" di ve anh dau tien
+    // cua danh sach, khong phai anh thu 2.
+    if (foundIndex === -1) {
+      if (allPhotos.length > 0) onNavigate(allPhotos[0]);
+      return;
+    }
     if (hasNext) {
       onNavigate(allPhotos[currentIndex + 1]);
     }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(
-      `${window.location.origin}#photo-${photo.id}`
-    );
+  const handleCopyLink = async () => {
+    const link = `${window.location.origin}#photo-${photo.id}`;
+    let ok = false;
+    try {
+      await navigator.clipboard?.writeText(link);
+      ok = true;
+    } catch {
+      // Fallback cho trinh duyet khong co Clipboard API.
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = link;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {
+        ok = false;
+      }
+    }
+    // Chi bao "da copy" khi copy that su thanh cong.
+    if (!ok) return;
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -340,7 +364,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
           <span>Phím ESC để đóng</span>
         </div>
         <div className="hidden sm:block">
-          YÊN VISUALS · COPYRIGHT © 2026
+          YÊN PHOTO · COPYRIGHT © 2026
         </div>
       </div>
     </div>

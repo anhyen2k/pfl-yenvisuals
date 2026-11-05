@@ -33,7 +33,7 @@ export const Hero: React.FC<HeroProps> = ({
           <div className="lg:col-span-6 space-y-6">
             {/* Clean unboxed kicker metadata */}
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-mono uppercase tracking-widest text-amber-700 dark:text-amber-400 font-medium">
-              <span>YÊN VISUALS</span>
+              <span>YÊN PHOTO</span>
               <span aria-hidden="true" className="hidden sm:inline">·</span>
               <span>KỈ YẾU & ÁO DÀI HÀ NỘI</span>
               <span aria-hidden="true" className="hidden sm:inline">·</span>
@@ -113,10 +113,10 @@ export const Hero: React.FC<HeroProps> = ({
                 {/* Scrim overlay */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
 
-                {/* Camera Badge */}
+                {/* Camera Badge: lay theo anh tieu bieu that, khong cung 85mm */}
                 <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-md border border-white/20 text-white rounded-md px-3 py-1.5 text-xs font-mono flex items-center gap-2">
                   <Aperture className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Sony A7 III · 85mm f/1.8</span>
+                  <span>{featuredPhoto.camera.replace('Sony A7 Mark III', 'Sony A7 III')} · {featuredPhoto.focalLength} {featuredPhoto.aperture}</span>
                 </div>
 
                 {/* Interactive click to view */}

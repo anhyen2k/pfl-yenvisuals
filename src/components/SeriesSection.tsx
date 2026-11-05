@@ -6,13 +6,15 @@
 import React from 'react';
 import { ArrowRight, BookOpen, MapPin, Calendar, Layers, CalendarCheck, X } from 'lucide-react';
 import { PHOTO_SERIES, INITIAL_PHOTOS, PhotoSeries } from '../data/portfolioData';
-import { SERIES_PACKAGE, getPackageDetails, BookingInquiry } from '../utils/portfolioLogic';
+import { SERIES_PACKAGE, getPackageDetails, BookingInquiry, PhotoItem } from '../utils/portfolioLogic';
 
 interface SeriesSectionProps {
   onSelectSeries: (seriesId: string) => void;
   onOpenBooking?: (pkg: BookingInquiry['packageType']) => void;
   selectedSeriesId?: string | null;
   onClearSeries?: () => void;
+  /** Anh dang hien thi (tu Cloud + anh mau); khong truyen thi dung INITIAL_PHOTOS. */
+  photos?: PhotoItem[];
 }
 
 export const SeriesSection: React.FC<SeriesSectionProps> = ({
@@ -20,6 +22,7 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
   onOpenBooking,
   selectedSeriesId,
   onClearSeries,
+  photos,
 }) => {
   return (
     <section id="series" className="py-16 md:py-24 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/30">
@@ -52,8 +55,10 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
         {/* Series Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-10">
           {PHOTO_SERIES.map((series, index) => {
-            // Dem that so anh thuoc series tu INITIAL_PHOTOS; = 0 thi dung so trong data lam fallback.
-            const realCount = INITIAL_PHOTOS.filter((photo) => photo.seriesId === series.id).length;
+            // Dem that so anh thuoc series tu anh dang hien thi (Cloud + mau);
+            // = 0 thi dung so trong data lam fallback.
+            const sourcePhotos = photos ?? INITIAL_PHOTOS;
+            const realCount = sourcePhotos.filter((photo) => photo.seriesId === series.id).length;
             const displayCount = realCount > 0 ? realCount : series.photoCount;
             const packageType = SERIES_PACKAGE[series.id];
             const packageDetails = packageType ? getPackageDetails(packageType) : null;

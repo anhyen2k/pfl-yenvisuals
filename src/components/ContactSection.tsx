@@ -60,7 +60,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
 
           <p className="text-sm sm:text-base text-neutral-600 dark:text-neutral-300 leading-relaxed font-light">
             Dù là buổi chụp kỉ yếu lưu niệm cả lớp, nhóm bạn thân gắn bó, hay một bộ ảnh áo dài cá nhân dạo phố thu Hà Nội —
-            Yên Visuals luôn sẵn sàng lắng nghe ý tưởng của bạn, tư vấn địa điểm đẹp và tạo bầu không khí thoải mái, vui vẻ nhất.
+            Yên Photo luôn sẵn sàng lắng nghe ý tưởng của bạn, tư vấn địa điểm đẹp và tạo bầu không khí thoải mái, vui vẻ nhất.
           </p>
 
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
@@ -78,7 +78,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
               className="inline-flex items-center gap-2 px-6 py-3.5 text-xs font-semibold tracking-wider uppercase text-neutral-800 dark:text-neutral-200 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 rounded-md transition-colors"
             >
               <Phone className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>Gọi / Zalo: 0912.888.266</span>
+              <span>Gọi / Zalo: {SITE_CONFIG.phoneDisplay}</span>
             </a>
           </div>
         </div>
@@ -123,7 +123,9 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
 
           {lookupDone && !lookupResult && (
             <p className="mt-4 text-sm text-rose-600 dark:text-rose-400">
-              Không tìm thấy đơn, kiểm tra lại mã và SĐT.
+              Không tìm thấy đơn, kiểm tra lại mã và SĐT. Lưu ý: chỉ tra được đơn đặt
+              trên thiết bị/trình duyệt này; nếu bạn đặt lịch ở máy khác, nhắn Zalo{' '}
+              {SITE_CONFIG.phoneDisplay} để Anh Yên kiểm tra giúp.
             </p>
           )}
 
@@ -142,7 +144,9 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
                 {lookupResult.clientName}
               </p>
               <p className="text-neutral-700 dark:text-neutral-300">
-                <span className="font-medium text-neutral-900 dark:text-white">Ngày chụp: </span>
+                <span className="font-medium text-neutral-900 dark:text-white">
+                  {lookupResult.packageType === 'photobook-print' ? 'Ngày nhận ảnh: ' : 'Ngày chụp: '}
+                </span>
                 {lookupResult.preferredDate}
                 {lookupResult.timeSlot ? ` · ${timeSlotLabel(lookupResult.timeSlot)}` : ''}
               </p>
@@ -223,7 +227,7 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
               Trao Đổi Ý Tưởng Cùng Anh Yên
             </div>
             <p className="text-neutral-600 dark:text-neutral-400 font-light">
-              Số điện thoại / Zalo: <strong className="text-neutral-900 dark:text-white font-mono text-sm">+84 (0) 912 888 266</strong>
+              Số điện thoại / Zalo: <strong className="text-neutral-900 dark:text-white font-mono text-sm">{SITE_CONFIG.phoneDisplay}</strong>
             </p>
             <p className="text-neutral-600 dark:text-neutral-400 font-light">
               Email nhận ảnh: <span className="font-mono text-neutral-900 dark:text-white">{SITE_CONFIG.photographerEmail}</span>

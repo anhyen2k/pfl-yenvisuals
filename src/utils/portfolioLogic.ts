@@ -44,14 +44,23 @@ export const SERIES_PACKAGE: Record<string, BookingInquiry['packageType']> = {
   'series-sen-tay-ho': 'aodai-solo',
 };
 
+function localISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function tomorrowISO(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return localISODate(d);
 }
 
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Dung ngay theo gio dia phuong (VN UTC+7), KHONG dung toISOString (UTC)
+  // vi sang som o VN toISOString van la ngay hom truoc.
+  return localISODate(new Date());
 }
 
 // --- SDT Viet Nam (diem 13) ---
@@ -243,7 +252,7 @@ export function getPackageDetails(packageType: BookingInquiry['packageType']) {
       return {
         name: 'Kỉ Yếu Nhóm Bạn Thân & Nhóm Nhỏ (5 - 15 bạn)',
         basePriceVND: 1200000,
-        formattedPrice: `${formatVND(1200000)} (Chỉ ~80k - 150k/bạn)`,
+        formattedPrice: `${formatVND(1200000)} (Chỉ ~80k - 240k/bạn)`,
         duration: '2.5 - 3.5 giờ chụp ngoại cảnh',
         deliverables: [
           'Chụp nhóm nhỏ tận tâm, chăm chút từng bạn (không lo bị bỏ quên như đi đoàn đông)',
@@ -300,19 +309,25 @@ export function validateBookingInquiry(inquiry: Partial<BookingInquiry>): {
   }
 
   if (!inquiry.phone || !isValidVietnamesePhone(inquiry.phone)) {
-    errors.phone = 'Vui lòng nhập số điện thoại Việt Nam 10 số, đầu 03/05/07/08/09 (vd: 0912 888 266)';
+    errors.phone = `Vui lòng nhập số điện thoại Việt Nam 10 số, đầu 03/05/07/08/09 (vd: ${SITE_CONFIG.phoneDisplay})`;
   }
 
   if (!inquiry.preferredDate) {
     errors.preferredDate = inquiry.packageType === 'photobook-print'
       ? 'Vui lòng chọn ngày muốn nhận ảnh'
       : 'Vui lòng chọn ngày dự kiến chụp kỉ yếu / áo dài';
-  } else if (inquiry.preferredDate < todayISO()) {
-    errors.preferredDate = 'Ngày đã chọn đã qua, vui lòng chọn ngày từ hôm nay trở đi (nên chọn từ ngày mai).';
+  } else if (inquiry.preferredDate < tomorrowISO()) {
+    // Date input cung min=tomorrow: hom nay tro ve truoc deu khong dat duoc
+    // (can thoi gian chuan bi, khong nhan lich chup trong ngay).
+    errors.preferredDate = 'Vui lòng chọn ngày từ ngày mai trở đi để Anh Yên có thời gian chuẩn bị.';
   }
 
   if (inquiry.packageType && inquiry.packageType !== 'photobook-print' && !inquiry.timeSlot) {
     errors.timeSlot = 'Vui lòng chọn khung giờ chụp';
+  }
+
+  if (inquiry.packageType === 'kiyieu-lop' && inquiry.groupCount !== undefined && inquiry.groupCount < 5) {
+    errors.groupSize = 'Gói kỉ yếu nhóm áp dụng cho nhóm từ 5 bạn trở lên (tối đa 30 bạn).';
   }
 
   // Note/Concept message is optional so clients can easily ask for consultation or quote even with short notes like "hi"
@@ -453,12 +468,12 @@ export function generateEmailNotification(
     year: 'numeric',
   });
 
-  const subject = `[YÊN VISUALS] 📩 Khách Đăng Ký Mới: ${lead.clientName} - ${pkg.name}`;
+  const subject = `[YÊN PHOTO] 📩 Khách Đăng Ký Mới: ${lead.clientName} - ${pkg.name}`;
   const previewSnippet = `${lead.clientName} vừa đăng ký gói ${pkg.name} (${pkg.formattedPrice}). SĐT: ${lead.phone}`;
 
   const fullBody = `
 ======================================================
-  YÊN VISUALS — THÔNG BÁO ĐĂNG KÝ CHỤP KỈ YẾU & ÁO DÀI
+  YÊN PHOTO — THÔNG BÁO ĐĂNG KÝ CHỤP KỈ YẾU & ÁO DÀI
 ======================================================
 
 Kính gửi: Anh Yên (${photographerEmail})
@@ -486,17 +501,17 @@ LỜI NHẮN / CONCEPT MONG MUỐN TỪ KHÁCH:
 HÀNH ĐỘNG KHUYẾN NGHỊ:
 1. Nhắn Zalo hoặc gọi ngay tới SĐT: ${lead.phone}
 2. Gửi moodboard concept kỉ yếu/áo dài qua email: ${lead.email}
-3. Cập nhật trạng thái tư vấn tại Dashboard quản lý Yên Visuals.
+3. Cập nhật trạng thái tư vấn tại Dashboard quản lý Yên Photo.
 
 ======================================================
-Hệ thống tự động đồng bộ từ website https://ais-dev-...
+Hệ thống tự động đồng bộ từ website ${SITE_CONFIG.siteUrl}
   `.trim();
 
   return {
     id: `EMAIL-${lead.id}-${Math.floor(1000 + Math.random() * 9000)}`,
     leadId: lead.id,
     toEmail: photographerEmail,
-    fromEmail: 'noreply@yenvisuals.vn',
+    fromEmail: photographerEmail,
     subject,
     sentAt: now,
     previewSnippet,
@@ -665,7 +680,7 @@ export function exportLeadsToExcel(leads: BookingLead[]): Uint8Array {
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
 
-  // Set optimal column widths for Excel readability
+  // Set optimal column widths for Excel readability (1 cot / truong).
   worksheet['!cols'] = [
     { wch: 6 },  // STT
     { wch: 15 }, // Mã Lịch Hẹn
@@ -678,13 +693,20 @@ export function exportLeadsToExcel(leads: BookingLead[]): Uint8Array {
     { wch: 18 }, // Ngày Chụp Dự Kiến
     { wch: 28 }, // Địa Điểm Mong Muốn
     { wch: 18 }, // Số Lượng Dự Kiến
+    { wch: 16 }, // Khung Giờ
+    { wch: 16 }, // Tiền Cọc
+    { wch: 16 }, // Đã Thu
+    { wch: 16 }, // Còn Lại
+    { wch: 30 }, // Link Drive
+    { wch: 18 }, // Ngày Hẹn Gọi Lại
+    { wch: 24 }, // Lý Do Hủy
     { wch: 24 }, // Trạng Thái Tư Vấn
     { wch: 38 }, // Concept & Lời Nhắn
     { wch: 35 }, // Ghi Chú Của Anh Yên
   ];
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'KhachHang_YenVisuals');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'KhachHang_YenPhoto');
   const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
   return new Uint8Array(excelBuffer);
 }
@@ -702,7 +724,7 @@ export async function sendBookingEmailReal(
 
   try {
     const payload = {
-      _subject: `[YÊN VISUALS] 📩 Đặt Lịch Chụp Mới: ${lead.clientName} - ${pkg.name}`,
+      _subject: `[YÊN PHOTO] 📩 Đặt Lịch Chụp Mới: ${lead.clientName} - ${pkg.name}`,
       'Mã đặt lịch': `#${lead.id}`,
       'Thời gian đăng ký': lead.createdAt,
       'Họ tên khách hàng / Nhóm': lead.clientName,
@@ -754,9 +776,9 @@ export function generateDirectMailtoUrl(
   targetEmail: string = SITE_CONFIG.photographerEmail
 ): string {
   const pkg = getPackageDetails(lead.packageType);
-  const subject = encodeURIComponent(`[YÊN VISUALS] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);
+  const subject = encodeURIComponent(`[YÊN PHOTO] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);
   const body = encodeURIComponent(
-    `Kính gửi Anh Yên (Yên Visuals),\n\n` +
+    `Kính gửi Anh Yên (Yên Photo),\n\n` +
     `Tôi gửi thông tin đặt lịch chụp kỉ yếu / áo dài:\n` +
     `- Mã đặt lịch: #${lead.id}\n` +
     `- Họ tên: ${lead.clientName}\n` +
@@ -781,9 +803,9 @@ export function generateWebGmailUrl(
   targetEmail: string = SITE_CONFIG.photographerEmail
 ): string {
   const pkg = getPackageDetails(lead.packageType);
-  const subject = encodeURIComponent(`[YÊN VISUALS] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);
+  const subject = encodeURIComponent(`[YÊN PHOTO] Đặt lịch chụp: ${lead.clientName} - ${pkg.name}`);
   const body = encodeURIComponent(
-    `Kính gửi Anh Yên (Yên Visuals),\n\n` +
+    `Kính gửi Anh Yên (Yên Photo),\n\n` +
     `Tôi gửi thông tin đặt lịch chụp kỉ yếu / áo dài:\n` +
     `- Mã đặt lịch: #${lead.id}\n` +
     `- Họ tên: ${lead.clientName}\n` +

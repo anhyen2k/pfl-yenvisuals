@@ -24,6 +24,8 @@ import {
   calculateEstimatedPrice,
   calculateDepositAmount,
   tomorrowISO,
+  todayISO,
+  generateEmailNotification,
   PhotoItem,
 } from './portfolioLogic.js';
 import * as portfolioLogicModule from './portfolioLogic.js';
@@ -374,6 +376,37 @@ test('validate chan ngay qua khu va bat khung gio tru photobook', () => {
   assert.equal(validateBookingInquiry({ ...base, packageType: 'photobook-print', timeSlot: undefined }).isValid, true);
 });
 
+test('ngay dung gio dia phuong, khong dat lich trong ngay hom nay', () => {
+  const now = new Date();
+  const expectedToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  assert.equal(todayISO(), expectedToday);
+  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: todayISO(), timeSlot: 'sang-7-9' };
+  assert.equal(validateBookingInquiry(base).isValid, false);
+  assert.ok(validateBookingInquiry(base).errors.preferredDate);
+  assert.equal(validateBookingInquiry({ ...base, preferredDate: tomorrowISO() }).isValid, true);
+});
+
+test('goi kiyieu nhom toi thieu 5 ban', () => {
+  const base: any = { clientName: 'Lop 12A1', email: 'a@b.com', phone: '0912345678', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9', groupCount: 4 };
+  assert.equal(validateBookingInquiry(base).isValid, false);
+  assert.ok(validateBookingInquiry(base).errors.groupSize);
+  assert.equal(validateBookingInquiry({ ...base, groupCount: 5 }).isValid, true);
+});
+
+test('gia kiyieu tren dau nguoi dung 80k-240k/ban', () => {
+  const kiyieu = getPackageDetails('kiyieu-lop');
+  assert.ok(kiyieu.formattedPrice.includes('80k - 240k'));
+  assert.equal(Math.round(1200000 / 15), 80000);
+  assert.equal(Math.round(1200000 / 5), 240000);
+});
+
+test('email log dung siteUrl that va fromEmail dung email nhan', () => {
+  const { emailLog } = createBookingLead({ clientName: 'Test', email: 't@x.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', message: '' } as any, 'anhyenk26@gmail.com');
+  assert.equal(emailLog.fromEmail, 'anhyenk26@gmail.com');
+  assert.ok(emailLog.fullBody.includes('https://pfl-yenphoto.vercel.app/'));
+  assert.ok(!emailLog.fullBody.includes('ais-dev'));
+});
+
 test('gia nhom vuot 15 nguoi +80k/nguoi va coc 30%', () => {
   assert.equal(calculateEstimatedPrice('kiyieu-lop', 15), 1200000);
   assert.equal(calculateEstimatedPrice('kiyieu-lop', 20), 1600000);
@@ -398,7 +431,7 @@ test('filterPhotos tim theo series va goi', () => {
 });
 
 test('filterLeads due-today chi lay don hen goi lai hom nay', () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const leads: any[] = [
     { id: '1', clientName: 'A', phone: '0911', email: 'a@x.com', status: 'new', nextFollowUpAt: today },
     { id: '2', clientName: 'B', phone: '0922', email: 'b@x.com', status: 'new', nextFollowUpAt: '2099-01-01' },

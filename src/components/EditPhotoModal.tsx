@@ -18,6 +18,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
+import { PHOTO_SERIES } from '../data/portfolioData';
 import { uploadPhotoToStorage } from '../services/firebase';
 
 interface EditPhotoModalProps {
@@ -64,6 +65,19 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
       setFormData((prev) => (prev ? { ...prev, [name]: checked } : null));
     } else if (name === 'iso') {
       setFormData((prev) => (prev ? { ...prev, iso: Number(value) || 100 } : null));
+    } else if (name === 'image') {
+      // Doi URL thi bo co anh hong de xem truoc hien lai.
+      setImageBroken(false);
+      setFormData((prev) => (prev ? { ...prev, [name]: value } : null));
+    } else if (name === 'seriesId') {
+      setFormData((prev) => (prev ? { ...prev, seriesId: value || undefined } : null));
+    } else if (name === 'aspectRatio') {
+      // Gallery dung orientation de chon khung: doi ti le thi doi huong theo.
+      const orientation: PhotoItem['orientation'] =
+        value === '3:4' ? 'portrait' : value === '1:1' ? 'square' : 'landscape';
+      setFormData((prev) =>
+        prev ? { ...prev, aspectRatio: value as PhotoItem['aspectRatio'], orientation } : null
+      );
     } else {
       setFormData((prev) => (prev ? { ...prev, [name]: value } : null));
     }
@@ -283,6 +297,25 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1">
+                  Bộ sưu tập (Series)
+                </label>
+                <select
+                  name="seriesId"
+                  value={formData.seriesId || ''}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">Không thuộc bộ nào</option>
+                  {PHOTO_SERIES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.vietnameseTitle}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400 mb-1">
@@ -354,7 +387,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   name="lens"
                   value={formData.lens}
                   onChange={handleChange}
-                  placeholder="FE 85mm f/1.4 GM"
+                  placeholder="FE 85mm f/1.8"
                   className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
                 />
               </div>
@@ -422,7 +455,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   name="year"
                   value={formData.year}
                   onChange={handleChange}
-                  placeholder="2024"
+                  placeholder="2026"
                   className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
                 />
               </div>
