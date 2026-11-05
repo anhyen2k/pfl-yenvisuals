@@ -141,7 +141,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
       {/* Top Bar with actions */}
       <div className="h-16 px-4 sm:px-6 flex items-center justify-between border-b border-neutral-800 text-neutral-300">
         <div className="flex items-center gap-4">
-          <div className="text-xs font-mono text-neutral-400">
+          <div className="text-xs font-sans tabular-nums text-neutral-400">
             <span className="text-white font-semibold">{currentIndex + 1}</span> / {allPhotos.length}
           </div>
           <span className="text-neutral-700 hidden sm:inline">|</span>
@@ -274,7 +274,8 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
             <img
               src={photo.image}
               alt={photo.vietnameseTitle}
-              className="max-h-[80vh] max-w-[85vw] object-contain shadow-2xl rounded-sm"
+              decoding="async"
+              className="max-h-[80vh] max-w-[85vw] object-contain shadow-xl rounded-sm"
               referrerPolicy="no-referrer"
             />
           </div>
@@ -284,20 +285,20 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
         {showInfoPanel && (
           <aside className="w-80 md:w-96 border-l border-neutral-800 bg-neutral-950/95 backdrop-blur-md p-6 overflow-y-auto space-y-6 text-neutral-300 shrink-0">
             <div>
-              <div className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-1">
+              <div className="text-xs font-sans tabular-nums text-neutral-500 uppercase tracking-widest mb-1">
                 {photo.location} · {photo.year}
               </div>
               <h2 className="text-2xl font-serif text-white font-medium">
                 {photo.vietnameseTitle}
               </h2>
-              <div className="text-xs font-mono text-neutral-400 mt-1 italic">
+              <div className="text-xs font-sans tabular-nums text-neutral-400 mt-1 italic">
                 {photo.title}
               </div>
             </div>
 
             {/* Backstory */}
             <div className="space-y-2 pt-2 border-t border-neutral-800">
-              <div className="text-xs font-mono uppercase text-neutral-400 tracking-wider">
+              <div className="text-xs font-sans tabular-nums uppercase text-neutral-400 tracking-wider">
                 Câu Chuyện Tác Phẩm
               </div>
               <p className="text-xs text-neutral-300 leading-relaxed font-light">
@@ -307,31 +308,31 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
 
             {/* Technical EXIF Specifications */}
             <div className="space-y-3 pt-2 border-t border-neutral-800">
-              <div className="text-xs font-mono uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
+              <div className="text-xs font-sans tabular-nums uppercase text-neutral-400 tracking-wider flex items-center gap-1.5">
                 <Camera className="w-3.5 h-3.5 text-neutral-400" />
                 <span>Thông Số Kỹ Thuật (EXIF)</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+              <div className="grid grid-cols-2 gap-3 text-xs font-sans tabular-nums">
                 <div className="p-2.5 rounded bg-neutral-900 border border-neutral-800">
-                  <div className="text-neutral-500 text-[10px]">THÂN MÁY</div>
+                  <div className="text-neutral-500 text-xs">THÂN MÁY</div>
                   <div className="text-white mt-0.5 truncate">{photo.camera}</div>
                 </div>
 
                 <div className="p-2.5 rounded bg-neutral-900 border border-neutral-800">
-                  <div className="text-neutral-500 text-[10px]">ỐNG KÍNH</div>
+                  <div className="text-neutral-500 text-xs">ỐNG KÍNH</div>
                   <div className="text-white mt-0.5 truncate">{photo.lens}</div>
                 </div>
 
                 <div className="p-2.5 rounded bg-neutral-900 border border-neutral-800">
-                  <div className="text-neutral-500 text-[10px]">TIÊU CỰ & KHẨU ĐỘ</div>
+                  <div className="text-neutral-500 text-xs">TIÊU CỰ & KHẨU ĐỘ</div>
                   <div className="text-white mt-0.5">
                     {photo.focalLength} · {photo.aperture}
                   </div>
                 </div>
 
                 <div className="p-2.5 rounded bg-neutral-900 border border-neutral-800">
-                  <div className="text-neutral-500 text-[10px]">TỐC ĐỘ & ISO</div>
+                  <div className="text-neutral-500 text-xs">TỐC ĐỘ & ISO</div>
                   <div className="text-white mt-0.5">
                     {photo.shutterSpeed} · ISO {photo.iso}
                   </div>
@@ -341,7 +342,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
 
             {/* Tags (Clean unboxed inline text) */}
             <div className="pt-2 border-t border-neutral-800 text-xs text-neutral-400">
-              <span className="font-mono text-[10px] uppercase text-neutral-500 block mb-1">Thẻ Tác Phẩm:</span>
+              <span className="font-sans tabular-nums text-xs uppercase text-neutral-500 block mb-1">Thẻ Tác Phẩm:</span>
               <div className="flex flex-wrap gap-2 text-neutral-300">
                 {photo.tags.map((tag, i) => (
                   <span key={tag}>
@@ -356,7 +357,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
       </div>
 
       {/* Bottom status line */}
-      <div className="h-10 px-6 border-t border-neutral-800 flex items-center justify-between text-[11px] font-mono text-neutral-500">
+      <div className="h-10 px-6 border-t border-neutral-800 flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
         <div className="flex items-center gap-2">
           <span>Dùng phím ← → để chuyển ảnh</span>
           <span aria-hidden="true">·</span>

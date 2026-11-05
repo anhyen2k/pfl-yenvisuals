@@ -52,6 +52,16 @@ import {
   type PackagePrices,
 } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
+import { ProofingManager } from './ProofingManager';
+import {
+  DEFAULT_SITE_CONTENT,
+  CONTENT_FIELD_LIMITS,
+  CONTENT_FIELD_LABELS,
+  mergeSiteContent,
+  validateSiteContent,
+  type SiteContent,
+  type PackageId,
+} from '../config/content';
 
 interface DashboardViewProps {
   leads: BookingLead[];
@@ -78,6 +88,19 @@ interface DashboardViewProps {
   pricingUpdatedAt?: string;
   /** Luu bang gia moi (App ghi Firestore + setState); khong truyen thi nut Luu bao loi. */
   onSavePackagePrices?: (prices: PackagePrices) => Promise<void>;
+  /**
+   * (v6) CHI ADMIN moi thay/nhan duoc cac prop nay. Dashboard chi render khi
+   * userRole la admin (App), nhung neu co duong nao mo duoc Settings thi
+   * cac muc Noi dung / Bang gia van bi chan o day (isAdmin=false -> chi xem
+   * + nut Luu bao loi, khong goi Firestore). Mac dinh false = chan.
+   */
+  isAdmin?: boolean;
+  /** Noi dung giao dien hien hanh (tu App / Firestore); khong truyen thi dung mac dinh. */
+  siteContent?: SiteContent;
+  /** Thoi gian luu noi dung lan cuoi (chuoi vi-VN); khong co thi khong hien. */
+  contentUpdatedAt?: string;
+  /** Luu noi dung moi (App ghi Firestore + setState); khong truyen thi nut Luu bao loi. */
+  onSaveSiteContent?: (content: SiteContent) => Promise<void>;
 }
 
 /* ---- Helpers nội bộ cho Dashboard (chỉ dùng trong file này) ---- */
@@ -144,6 +167,43 @@ const PACKAGE_FORM_META: { id: BookingLead['packageType']; name: string; desc: s
   { id: 'kiyieu-lop', name: 'Kỉ Yếu Nhóm Bạn Thân (5-15 bạn)', desc: 'Chụp kĩ từng bạn, trả 100% file gốc, 30 ảnh chỉnh màu' },
   { id: 'cophuc-heritage', name: 'Áo Dài Cổ Phục & Mùa Thu', desc: 'Chụp di tích Hoàng Thành, Văn Miếu, tặng mượn nón lá' },
   { id: 'photobook-print', name: 'Gói Rửa Ảnh & Set Để Bàn', desc: 'In 20 ảnh lụa mini + 1 khung ảnh để bàn 15x21cm' },
+];
+
+// (v6) Nhom truong sua noi dung giao dien (tab Cai dat, muc 2).
+// Gioi han ky tu lay tu CONTENT_FIELD_LIMITS (config/content.ts).
+type ContentTextField = keyof Omit<SiteContent, 'packageDescriptions'>;
+const CONTENT_FORM_GROUPS: { title: string; fields: { key: ContentTextField; multiline?: boolean }[] }[] = [
+  {
+    title: 'Hero — Tiêu đề, mô tả & nút bấm',
+    fields: [
+      { key: 'heroTitle', multiline: true },
+      { key: 'heroSubtitle', multiline: true },
+      { key: 'heroPrimaryCta' },
+      { key: 'heroSecondaryCta' },
+      { key: 'marqueeText', multiline: true },
+    ],
+  },
+  {
+    title: 'Về tôi — Tên, vai trò & giới thiệu',
+    fields: [
+      { key: 'aboutName' },
+      { key: 'aboutRole' },
+      { key: 'aboutBioShort', multiline: true },
+      { key: 'aboutBioLong', multiline: true },
+    ],
+  },
+  {
+    title: 'Liên hệ — Khu vực, giờ làm việc & ghi chú',
+    fields: [
+      { key: 'contactAreas', multiline: true },
+      { key: 'contactHours' },
+      { key: 'contactNote', multiline: true },
+    ],
+  },
+  {
+    title: 'Footer — Tagline cuối trang',
+    fields: [{ key: 'footerTagline', multiline: true }],
+  },
 ];
 
 // "650000" -> "650.000" (hien trong o nhap gia); nhap so tho, dinh dang khi go.
@@ -276,6 +336,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   packagePrices,
   pricingUpdatedAt,
   onSavePackagePrices,
+  isAdmin = false,
+  siteContent,
+  contentUpdatedAt,
+  onSaveSiteContent,
 }) => {
   const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
 
@@ -307,6 +371,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handleSavePackagePrices = async () => {
+    // (v6) Chan client-side truoc khi goi Firestore (them lop nua ngoai
+    // requireAdmin trong firebase.ts + rules tren Cloud).
+    if (!isAdmin) {
+      setPriceErrors(['Chỉ quản trị viên mới được đổi giá. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.']);
+      setPriceSaveMsg(null);
+      return;
+    }
     const candidate: PackagePrices = {
       'aodai-solo': parsePriceText(priceDrafts['aodai-solo']),
       'kiyieu-lop': parsePriceText(priceDrafts['kiyieu-lop']),
@@ -340,6 +411,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   const handleResetPackagePrices = async () => {
+    if (!isAdmin) {
+      setPriceErrors(['Chỉ quản trị viên mới được khôi phục giá mặc định.']);
+      setPriceSaveMsg(null);
+      return;
+    }
     if (!window.confirm('Khôi phục toàn bộ bảng giá về giá mặc định (650k / 1.200k / 850k / 450k, phí vượt người 80k)? Giá mặc định sẽ được lưu và áp dụng ngay cho đơn đặt mới.')) return;
     setPriceDrafts(formatPriceDrafts(DEFAULT_PACKAGE_PRICES));
     setExtraDraft(formatPriceText(DEFAULT_PACKAGE_PRICES.extraPerPerson));
@@ -357,6 +433,100 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       setPriceErrors([e?.message || 'Khôi phục giá mặc định thất bại, vui lòng thử lại.']);
     } finally {
       setIsSavingPrices(false);
+    }
+  };
+
+  // --- (v6) Don dang mo muc proofing (tab Leads, ca desktop + mobile) ---
+  const [expandedProofingLeadId, setExpandedProofingLeadId] = useState<string | null>(null);
+
+  // --- (v6) Form sua noi dung giao dien (tab Settings, muc 2) ---
+  const [contentDrafts, setContentDrafts] = useState<SiteContent>(() => ({
+    ...(siteContent ?? DEFAULT_SITE_CONTENT),
+    packageDescriptions: { ...(siteContent ?? DEFAULT_SITE_CONTENT).packageDescriptions },
+  }));
+  const [contentErrors, setContentErrors] = useState<string[]>([]);
+  const [contentSaveMsg, setContentSaveMsg] = useState<string | null>(null);
+  const [isSavingContent, setIsSavingContent] = useState(false);
+
+  // Noi dung tu App / Firestore ve sau (load async, subscribe live) thi nap lai form.
+  useEffect(() => {
+    if (!siteContent) return;
+    setContentDrafts({
+      ...siteContent,
+      packageDescriptions: { ...siteContent.packageDescriptions },
+    });
+    setContentErrors([]);
+  }, [siteContent]);
+
+  const handleContentFieldChange = (field: keyof Omit<SiteContent, 'packageDescriptions'>, value: string) => {
+    setContentDrafts((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handlePackageDescChange = (id: PackageId, value: string) => {
+    setContentDrafts((prev) => ({
+      ...prev,
+      packageDescriptions: { ...prev.packageDescriptions, [id]: value },
+    }));
+  };
+
+  const handleSaveSiteContent = async () => {
+    // Chan client-side truoc khi goi Firestore (them lop nua ngoai
+    // requireAdmin trong firebase.ts + rules tren Cloud).
+    if (!isAdmin) {
+      setContentErrors(['Chỉ quản trị viên mới được sửa nội dung giao diện. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.']);
+      setContentSaveMsg(null);
+      return;
+    }
+    const merged = mergeSiteContent(contentDrafts);
+    const errors = validateSiteContent(contentDrafts);
+    if (errors.length > 0) {
+      setContentErrors(errors);
+      setContentSaveMsg(null);
+      return;
+    }
+    if (!onSaveSiteContent) {
+      setContentErrors(['Chưa cấu hình lưu nội dung (thiếu onSaveSiteContent) — nội dung chưa được lưu.']);
+      setContentSaveMsg(null);
+      return;
+    }
+    setContentErrors([]);
+    setContentSaveMsg(null);
+    setIsSavingContent(true);
+    try {
+      await onSaveSiteContent(merged);
+      setContentDrafts(merged);
+      setContentSaveMsg('Đã lưu, khách sẽ thấy nội dung mới khi tải lại trang.');
+      triggerCopyToast('Đã lưu nội dung giao diện!');
+    } catch (e: any) {
+      setContentErrors([e?.message || 'Lưu nội dung thất bại, vui lòng thử lại.']);
+    } finally {
+      setIsSavingContent(false);
+    }
+  };
+
+  const handleResetSiteContent = async () => {
+    if (!isAdmin) {
+      setContentErrors(['Chỉ quản trị viên mới được khôi phục nội dung mặc định.']);
+      setContentSaveMsg(null);
+      return;
+    }
+    if (!window.confirm('Khôi phục toàn bộ nội dung giao diện về mặc định? Nội dung hiện tại sẽ bị thay thế.')) return;
+    setContentErrors([]);
+    if (!onSaveSiteContent) {
+      setContentDrafts({ ...DEFAULT_SITE_CONTENT, packageDescriptions: { ...DEFAULT_SITE_CONTENT.packageDescriptions } });
+      setContentSaveMsg('Đã đặt lại nội dung mặc định trong form — bấm "Lưu nội dung" để áp dụng.');
+      return;
+    }
+    setIsSavingContent(true);
+    try {
+      await onSaveSiteContent({ ...DEFAULT_SITE_CONTENT, packageDescriptions: { ...DEFAULT_SITE_CONTENT.packageDescriptions } });
+      setContentDrafts({ ...DEFAULT_SITE_CONTENT, packageDescriptions: { ...DEFAULT_SITE_CONTENT.packageDescriptions } });
+      setContentSaveMsg('Đã khôi phục nội dung mặc định!');
+      triggerCopyToast('Đã khôi phục nội dung mặc định!');
+    } catch (e: any) {
+      setContentErrors([e?.message || 'Khôi phục nội dung mặc định thất bại, vui lòng thử lại.']);
+    } finally {
+      setIsSavingContent(false);
     }
   };
 
@@ -627,7 +797,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     <div className="min-h-screen bg-neutral-100 dark:bg-[#070709] text-neutral-900 dark:text-neutral-100 flex flex-col font-sans">
       {/* Toast Notification */}
       {copiedNotification && (
-        <div className="fixed bottom-6 right-6 z-50 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 px-4 py-2.5 rounded-lg text-xs font-medium shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+        <div className="fixed bottom-6 right-6 z-50 bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 px-4 py-2.5 rounded-lg text-xs font-medium flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
           <span>{copiedNotification}</span>
         </div>
@@ -655,11 +825,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="font-serif font-bold text-base tracking-wide text-neutral-900 dark:text-white">
                   YÊN PHOTO
                 </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 font-semibold border border-amber-300 dark:border-amber-800">
+                <span className="text-xs font-sans tabular-nums px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 font-semibold border border-amber-300 dark:border-amber-800">
                   DASHBOARD QUẢN TRỊ
                 </span>
                 {currentUser ? (
-                  <span className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                  <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-sans tabular-nums px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     <span>Cloud Firestore ({currentUser.email || 'Lưu vĩnh viễn'})</span>
                   </span>
@@ -667,7 +837,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <button
                     type="button"
                     onClick={onGoogleLogin}
-                    className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                    className="hidden md:inline-flex items-center gap-1.5 text-xs font-sans tabular-nums px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
                     title={`Bấm để đăng nhập tài khoản Google ${SITE_CONFIG.photographerEmail} và kích hoạt đồng bộ đám mây thời gian thực`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -675,7 +845,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </button>
                 )}
               </div>
-              <div className="text-[11px] text-neutral-500 font-mono hidden sm:block">
+              <div className="text-xs text-neutral-500 font-sans tabular-nums hidden sm:block">
                 Quản lý lịch chụp, đồng bộ thời gian thực đám mây & xuất file Excel
               </div>
             </div>
@@ -684,7 +854,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Right: User Profile & Quick Actions */}
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Quick stats indicator */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-xs font-mono">
+            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700 text-xs font-sans tabular-nums">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-neutral-600 dark:text-neutral-300">{photographerEmail}</span>
               <span className="text-neutral-400">· Sony A7 III</span>
@@ -721,57 +891,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           {/* Card 1: Total Leads */}
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
               <span>TỔNG YÊU CẦU</span>
               <Users className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
               {stats.totalLeads}
             </div>
-            <div className="text-[11px] text-neutral-500">
-              Tỷ lệ chốt thành công: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{stats.conversionRate}%</span>
+            <div className="text-xs text-neutral-500">
+              Tỷ lệ chốt thành công: <span className="font-sans tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold">{stats.conversionRate}%</span>
             </div>
           </div>
 
           {/* Card 2: New Leads Requiring Consultation */}
           <div className="p-5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-amber-700 dark:text-amber-400 font-medium">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-amber-700 dark:text-amber-400 font-medium">
               <span>CẦN TƯ VẤN GẤP</span>
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
             </div>
             <div className="text-2xl sm:text-3xl font-serif font-bold text-amber-900 dark:text-amber-300 tabular-nums">
               {stats.newLeads}
             </div>
-            <div className="text-[11px] text-amber-700 dark:text-amber-400">
+            <div className="text-xs text-amber-700 dark:text-amber-400">
               Khách mới gửi form chưa liên hệ
             </div>
           </div>
 
           {/* Card 3: Deposited / Booked */}
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
               <span>ĐÃ CHỐT / ĐÃ CỌC</span>
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
             </div>
             <div className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
               {stats.depositedLeads + stats.completedLeads}
             </div>
-            <div className="text-[11px] text-neutral-500">
-              Đang tư vấn Zalo: <span className="font-mono text-sky-600 dark:text-sky-400">{stats.consultingLeads} khách</span>
+            <div className="text-xs text-neutral-500">
+              Đang tư vấn Zalo: <span className="font-sans tabular-nums text-sky-600 dark:text-sky-400">{stats.consultingLeads} khách</span>
             </div>
           </div>
 
           {/* Card 4: Estimated Revenue */}
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
               <span>DOANH THU ĐÃ CHỐT</span>
               <DollarSign className="w-4 h-4 text-emerald-500" />
             </div>
             <div className="text-xl sm:text-2xl font-serif font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
               {formatVND(stats.estimatedRevenue)}
             </div>
-            <div className="text-[11px] text-neutral-500">
-              Tiềm năng: <span className="font-mono">{formatVND(stats.potentialRevenue)}</span>
+            <div className="text-xs text-neutral-500">
+              Tiềm năng: <span className="font-sans tabular-nums">{formatVND(stats.potentialRevenue)}</span>
             </div>
           </div>
         </div>
@@ -779,36 +949,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Payment Summary Row: da thu / tien coc / con phai thu */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
               <span>ĐÃ THU</span>
               <DollarSign className="w-4 h-4 text-emerald-500" />
             </div>
             <div className="text-xl sm:text-2xl font-serif font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
               {formatVND(stats.totalPaid)}
             </div>
-            <div className="text-[11px] text-neutral-500">Tổng tiền khách đã trả (chưa tính đơn đã hủy)</div>
+            <div className="text-xs text-neutral-500">Tổng tiền khách đã trả (chưa tính đơn đã hủy)</div>
           </div>
 
           <div className="p-5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-neutral-500">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-neutral-500">
               <span>TIỀN CỌC</span>
               <DollarSign className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-xl sm:text-2xl font-serif font-bold text-neutral-900 dark:text-white tabular-nums">
               {formatVND(stats.totalDeposited)}
             </div>
-            <div className="text-[11px] text-neutral-500">Tổng tiền cọc theo gói (30% giá gói)</div>
+            <div className="text-xs text-neutral-500">Tổng tiền cọc theo gói (30% giá gói)</div>
           </div>
 
           <div className="p-5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-1">
-            <div className="flex items-center justify-between text-xs font-mono text-amber-700 dark:text-amber-400 font-medium">
+            <div className="flex items-center justify-between text-xs font-sans tabular-nums text-amber-700 dark:text-amber-400 font-medium">
               <span>CÒN PHẢI THU</span>
               <AlertCircle className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-xl sm:text-2xl font-serif font-bold text-amber-900 dark:text-amber-300 tabular-nums">
               {formatVND(stats.totalBalance)}
             </div>
-            <div className="text-[11px] text-amber-700 dark:text-amber-400">Tổng số tiền khách còn nợ</div>
+            <div className="text-xs text-amber-700 dark:text-amber-400">Tổng số tiền khách còn nợ</div>
           </div>
         </div>
 
@@ -827,7 +997,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           }`}
         >
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs font-mono text-rose-700 dark:text-rose-400 font-medium">
+            <div className="flex items-center gap-2 text-xs font-sans tabular-nums text-rose-700 dark:text-rose-400 font-medium">
               <AlertCircle className="w-4 h-4 text-rose-500" />
               <span>VIỆC CẦN LÀM HÔM NAY {statusFilter === 'todo' ? '· ĐANG LỌC' : ''}</span>
             </div>
@@ -835,10 +1005,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {todoCount}
             </span>
           </div>
-          <div className="text-[11px] text-rose-700 dark:text-rose-400">
-            Cần gọi lại: <span className="font-mono font-semibold">{todoCallCount} đơn</span>
-            {' · '}Sắp chụp chưa cọc: <span className="font-mono font-semibold">{todoSoonUnpaidCount} đơn</span>
-            {' · '}Chưa trả ảnh: <span className="font-mono font-semibold">{todoNoPhotoCount} đơn</span>
+          <div className="text-xs text-rose-700 dark:text-rose-400">
+            Cần gọi lại: <span className="font-sans tabular-nums font-semibold">{todoCallCount} đơn</span>
+            {' · '}Sắp chụp chưa cọc: <span className="font-sans tabular-nums font-semibold">{todoSoonUnpaidCount} đơn</span>
+            {' · '}Chưa trả ảnh: <span className="font-sans tabular-nums font-semibold">{todoNoPhotoCount} đơn</span>
             <span className="text-neutral-500 dark:text-neutral-400"> (một đơn có thể thuộc nhiều nhóm, số tổng đếm mỗi đơn 1 lần)</span>
           </div>
         </button>
@@ -858,7 +1028,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Users className="w-3.5 h-3.5" />
               <span>Khách Đăng Ký ({leads.length})</span>
               {stats.newLeads > 0 && (
-                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-amber-500 text-white font-sans tabular-nums">
                   {stats.newLeads}
                 </span>
               )}
@@ -1002,27 +1172,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   >
                     {s.label}
                     {s.id === 'due-today' && dueTodayCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-amber-500 text-white font-sans tabular-nums">
                         {dueTodayCount}
                       </span>
                     )}
                     {s.id === 'todo' && todoCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-mono">
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-rose-500 text-white font-sans tabular-nums">
                         {todoCount}
                       </span>
                     )}
                     {s.id === 'shooting-7d' && shootingSoonCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-amber-500 text-white font-sans tabular-nums">
                         {shootingSoonCount}
                       </span>
                     )}
                     {s.id === 'no-deposit' && noDepositCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-amber-500 text-white font-sans tabular-nums">
                         {noDepositCount}
                       </span>
                     )}
                     {s.id === 'no-photos' && noPhotosCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono">
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full text-xs bg-amber-500 text-white font-sans tabular-nums">
                         {noPhotosCount}
                       </span>
                     )}
@@ -1036,7 +1206,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 text-neutral-500 font-mono text-[11px] uppercase">
+                    <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 text-neutral-500 font-sans tabular-nums text-xs uppercase">
                       <th className="py-3 px-4 font-semibold">Khách Hàng & Liên Hệ</th>
                       <th className="py-3 px-4 font-semibold">Gói Chụp & Giá</th>
                       <th className="py-3 px-4 font-semibold">Ngày & Địa Điểm</th>
@@ -1066,8 +1236,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         const isSoonUnpaid = isShootingSoonUnpaid(lead, todayStr);
 
                         return (
+                          <React.Fragment key={lead.id}>
                           <tr
-                            key={lead.id}
                             className={`hover:bg-neutral-50 dark:hover:bg-neutral-900/40 transition-colors ${
                               isOverdue
                                 ? 'bg-rose-50 dark:bg-rose-950/20'
@@ -1081,7 +1251,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <div className="font-semibold text-neutral-900 dark:text-white text-sm">
                                 {lead.clientName}
                               </div>
-                              <div className="flex flex-wrap items-center gap-1.5 text-neutral-500 text-[11px] mt-0.5 font-mono">
+                              <div className="flex flex-wrap items-center gap-1.5 text-neutral-500 text-xs mt-0.5 font-sans tabular-nums">
                                 <span>
                                   Mã: #{lead.id} · {lead.createdAt}
                                 </span>
@@ -1089,7 +1259,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleCopyBookingCode(lead)}
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
                                   title={`Sao chép mã đơn ${lead.id}`}
                                 >
                                   <Copy className="w-3 h-3" />
@@ -1099,7 +1269,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <div className="flex flex-wrap items-center gap-2 mt-2">
                                 <a
                                   href={`tel:${cleanPhone}`}
-                                  className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                                  className="inline-flex items-center gap-1 text-xs font-sans tabular-nums text-emerald-600 dark:text-emerald-400 hover:underline"
                                   title="Gọi điện trực tiếp"
                                 >
                                   <Phone className="w-3 h-3" />
@@ -1109,7 +1279,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   href={`https://zalo.me/${cleanPhone}`}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300 font-medium hover:bg-blue-100"
+                                  className="px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300 font-medium hover:bg-blue-100"
                                 >
                                   Chat Zalo
                                 </a>
@@ -1121,26 +1291,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               <div className="font-medium text-neutral-800 dark:text-neutral-200">
                                 {getPackageDetails(lead.packageType).name}
                               </div>
-                              <div className="text-amber-600 dark:text-amber-400 font-mono font-semibold mt-1">
+                              <div className="text-amber-600 dark:text-amber-400 font-sans tabular-nums font-semibold mt-1">
                                 {formatVND(lead.estimatedPrice)}
                               </div>
-                              <div className="text-neutral-400 text-[11px] mt-0.5">
+                              <div className="text-neutral-400 text-xs mt-0.5">
                                 Quy mô: {lead.groupSize || '1 - 2 bạn'}
                               </div>
                             </td>
 
                             {/* Date & Location column */}
                             <td className="py-4 px-4 align-top">
-                              <div className="flex items-center gap-1 font-mono text-neutral-800 dark:text-neutral-200">
+                              <div className="flex items-center gap-1 font-sans tabular-nums text-neutral-800 dark:text-neutral-200">
                                 <Clock className="w-3 h-3 text-neutral-400" />
                                 <span>{lead.preferredDate || 'Chưa chọn ngày'}</span>
                               </div>
-                              <div className="text-neutral-600 dark:text-neutral-400 text-[11px] mt-1 line-clamp-2">
+                              <div className="text-neutral-600 dark:text-neutral-400 text-xs mt-1 line-clamp-2">
                                 {lead.location}
                               </div>
                               {/* (d) Sắp chụp trong 7 ngày mà chưa cọc */}
                               {isSoonUnpaid && (
-                                <div className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                <div className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                                   <AlertCircle className="w-3 h-3" />
                                   <span>Sắp chụp chưa cọc</span>
                                 </div>
@@ -1154,7 +1324,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </div>
                               {lead.nextFollowUpAt && (
                                 <div
-                                  className={`text-[11px] mt-1 font-mono whitespace-nowrap ${
+                                  className={`text-xs mt-1 font-sans tabular-nums whitespace-nowrap ${
                                     isOverdue
                                       ? 'text-rose-600 dark:text-rose-400 font-semibold'
                                       : 'text-amber-600 dark:text-amber-400'
@@ -1163,7 +1333,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   Hẹn gọi: {lead.nextFollowUpAt}
                                   {/* (d) Quá hạn gọi lại */}
                                   {isOverdue && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-xs font-semibold bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
                                       Quá hạn
                                     </span>
                                   )}
@@ -1173,17 +1343,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                             {/* Deposit column */}
                             <td className="py-4 px-4 align-top">
-                              <div className="font-mono font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
+                              <div className="font-sans tabular-nums font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
                                 {formatVND(lead.depositAmount || 0)}
                               </div>
-                              <div className="text-neutral-400 text-[11px] mt-0.5 whitespace-nowrap">
+                              <div className="text-neutral-400 text-xs mt-0.5 whitespace-nowrap">
                                 Đã thu: {formatVND(lead.paidAmount || 0)}
                               </div>
                             </td>
 
                             {/* Remaining balance column */}
                             <td className="py-4 px-4 align-top">
-                              <div className="font-mono font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                              <div className="font-sans tabular-nums font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
                                 {formatVND(
                                   lead.balance ??
                                     Math.max(0, (lead.estimatedPrice || 0) - (lead.paidAmount || 0))
@@ -1211,13 +1381,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 <option value="cancelled">Đã Hủy Lịch</option>
                               </select>
                               {lead.status === 'cancelled' && lead.cancelReason && (
-                                <div className="text-[10px] text-neutral-400 mt-1">
+                                <div className="text-xs text-neutral-400 mt-1">
                                   Lý do hủy: {lead.cancelReason}
                                 </div>
                               )}
                               {pendingStatus[lead.id] && (
                                 <div className="mt-2 space-y-1.5">
-                                  <label className="block text-[10px] text-neutral-500">
+                                  <label className="block text-xs text-neutral-500">
                                     Ngày hẹn gọi lại
                                   </label>
                                   <input
@@ -1246,7 +1416,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                     />
                                   )}
                                   {statusErrors[lead.id] && (
-                                    <div className="text-[10px] text-rose-600 dark:text-rose-400">
+                                    <div className="text-xs text-rose-600 dark:text-rose-400">
                                       {statusErrors[lead.id]}
                                     </div>
                                   )}
@@ -1259,7 +1429,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   </button>
                                 </div>
                               )}
-                              <div className="text-[10px] text-neutral-400 mt-1 font-mono">
+                              <div className="text-xs text-neutral-400 mt-1 font-sans tabular-nums">
                                 Email gửi: {lead.emailSentTo}
                               </div>
                             </td>
@@ -1271,10 +1441,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   "{lead.notes}"
                                 </p>
                               ) : (
-                                <span className="text-neutral-400 text-[11px] italic">Chưa có ghi chú</span>
+                                <span className="text-neutral-400 text-xs italic">Chưa có ghi chú</span>
                               )}
                               {lead.message && (
-                                <div className="text-neutral-500 text-[11px] mt-1 line-clamp-1">
+                                <div className="text-neutral-500 text-xs mt-1 line-clamp-1">
                                   Lời nhắn: {lead.message}
                                 </div>
                               )}
@@ -1309,7 +1479,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                   href={lead.driveLink}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="inline-flex items-center gap-1 mt-1 text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
+                                  className="inline-flex items-center gap-1 mt-1 text-xs text-sky-600 dark:text-sky-400 hover:underline"
                                 >
                                   <ExternalLink className="w-3 h-3" />
                                   <span>Mở Drive</span>
@@ -1369,6 +1539,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                                 Tư Vấn
                               </button>
 
+                              {/* (v6) Mo muc anh proofing cua don nay */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedProofingLeadId((prev) => (prev === lead.id ? null : lead.id))
+                                }
+                                className={`px-2.5 py-1 text-xs rounded transition-colors cursor-pointer ${
+                                  expandedProofingLeadId === lead.id
+                                    ? 'bg-amber-600 text-white'
+                                    : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 border border-amber-200 dark:border-amber-800'
+                                }`}
+                                title="Up / xem ảnh proofing riêng cho đơn này"
+                              >
+                                {expandedProofingLeadId === lead.id ? 'Đóng proofing' : 'Ảnh proofing'}
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1384,6 +1570,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </button>
                             </td>
                           </tr>
+                          {/* (v6) Hang mo rong: anh proofing cua don nay */}
+                          {expandedProofingLeadId === lead.id && (
+                            <tr>
+                              <td colSpan={10} className="py-4 px-4 bg-neutral-50/60 dark:bg-neutral-900/30">
+                                <ProofingManager lead={lead} onToast={triggerCopyToast} />
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -1415,12 +1610,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <div className="font-semibold text-sm text-neutral-900 dark:text-white truncate">
                             {lead.clientName}
                           </div>
-                          <div className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400 mt-0.5">
+                          <div className="text-xs font-sans tabular-nums text-neutral-500 dark:text-neutral-400 mt-0.5">
                             Mã: #{lead.id} · {lead.createdAt}
                           </div>
                         </div>
                         <span
-                          className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.color} ${statusBadge.border}`}
+                          className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold border ${statusBadge.bg} ${statusBadge.color} ${statusBadge.border}`}
                         >
                           {statusBadge.label}
                         </span>
@@ -1436,7 +1631,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <div>{getPackageDetails(lead.packageType).name}</div>
                         <div className="flex items-center justify-between pt-1">
                           <span className="text-neutral-500 dark:text-neutral-400">Tiền còn lại</span>
-                          <span className="font-mono font-bold text-base text-amber-600 dark:text-amber-400">
+                          <span className="font-sans tabular-nums font-bold text-base text-amber-600 dark:text-amber-400">
                             {formatVND(leadBalance(lead))}
                           </span>
                         </div>
@@ -1468,6 +1663,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <span>Sao chép mã</span>
                         </button>
                       </div>
+                      {/* (v6) Anh proofing cua don nay (mobile) */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedProofingLeadId((prev) => (prev === lead.id ? null : lead.id))
+                        }
+                        className={`w-full px-3 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                          expandedProofingLeadId === lead.id
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                        }`}
+                      >
+                        {expandedProofingLeadId === lead.id ? 'Đóng ảnh proofing' : 'Ảnh proofing của đơn này'}
+                      </button>
+                      {expandedProofingLeadId === lead.id && (
+                        <ProofingManager lead={lead} onToast={triggerCopyToast} />
+                      )}
                     </article>
                   );
                 })
@@ -1496,7 +1708,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   type="email"
                   value={photographerEmail}
                   onChange={(e) => onUpdatePhotographerEmail(e.target.value)}
-                  className="px-3 py-1.5 text-xs font-mono bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md dark:text-white"
+                  className="px-3 py-1.5 text-xs font-sans tabular-nums bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md dark:text-white"
                 />
               </div>
             </div>
@@ -1555,10 +1767,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                        <span className="px-2 py-0.5 rounded text-xs font-sans tabular-nums font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
                           ĐÃ GỬI TỚI {log.toEmail}
                         </span>
-                        <span className="text-xs font-mono text-neutral-400">
+                        <span className="text-xs font-sans tabular-nums text-neutral-400">
                           {log.sentAt} · #{log.id}
                         </span>
                       </div>
@@ -1602,7 +1814,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <h4 className="text-sm font-semibold text-neutral-900 dark:text-white">
                         {log.subject}
                       </h4>
-                      <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 line-clamp-2 font-mono">
+                      <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 line-clamp-2 font-sans tabular-nums">
                         {log.previewSnippet}
                       </p>
                     </div>
@@ -1644,19 +1856,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 >
                   <div className="aspect-[4/3] rounded-lg overflow-hidden relative bg-neutral-100 dark:bg-neutral-900">
                     <img
-                      src={photo.image}
+                      src={photo.thumbUrl || photo.image}
                       alt={photo.vietnameseTitle}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover"
                     />
                     {photo.featured && (
-                      <div className="absolute top-3 left-3 px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-amber-500 text-white font-bold shadow-xs">
+                      <div className="absolute top-3 left-3 px-2 py-0.5 rounded text-xs font-sans tabular-nums uppercase bg-amber-500 text-white font-bold shadow-xs">
                         Ảnh Tiêu Điểm Hero
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
+                    <div className="text-xs font-sans tabular-nums text-amber-600 dark:text-amber-400">
                       {photo.camera} · {photo.lens}
                     </div>
                     <div className="text-sm font-serif font-semibold text-neutral-900 dark:text-white">
@@ -1715,7 +1929,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
               {/* Photographer Info */}
               <div className="space-y-4 pt-4 border-t border-neutral-200 dark:border-neutral-800">
-                <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                <div className="text-xs font-sans tabular-nums uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
                   1. THÔNG TIN THỢ ẢNH & EMAIL THÔNG BÁO
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -1727,7 +1941,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       type="text"
                       defaultValue="Anh Yên"
                       readOnly
-                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums"
                     />
                   </div>
                   <div>
@@ -1738,9 +1952,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       type="email"
                       value={photographerEmail}
                       onChange={(e) => onUpdatePhotographerEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 font-semibold"
+                      className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums text-amber-600 font-semibold"
                     />
-                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                       Đổi email này chỉ đổi nơi nhận đơn, không đổi tài khoản quản trị (luôn là anhyenk26@gmail.com).
                     </p>
                   </div>
@@ -1752,7 +1966,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       type="text"
                       defaultValue={SITE_CONFIG.phoneDisplay}
                       readOnly
-                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums"
                     />
                   </div>
                   <div>
@@ -1763,16 +1977,119 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       type="text"
                       defaultValue="Sony Alpha 7 Mark III (ILCE-7M3)"
                       readOnly
-                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono"
+                      className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums"
                     />
                   </div>
                 </div>
               </div>
 
+              {/* (v6) Noi dung giao dien — CHI ADMIN duoc sua. Neu mo duoc
+                  Settings ma khong phai admin thi chi xem, nut Luu bao loi
+                  va khong goi Firestore (xem handleSaveSiteContent). */}
+              <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
+                <div className="text-xs font-sans tabular-nums uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  2. NỘI DUNG GIAO DIỆN KHÁCH HÀNG
+                </div>
+                <p className="text-xs text-neutral-500">
+                  Sửa chữ khách nhìn thấy trên web (Hero, Về tôi, mô tả gói, Liên hệ, Footer) mà
+                  không cần sửa code. Chỉ hiển thị text thuần, không cho chèn HTML. Lưu xong khách
+                  sẽ thấy nội dung mới khi tải lại trang.
+                </p>
+                {!isAdmin && (
+                  <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                    Bạn đang xem với quyền khách — chỉ quản trị viên (anhyenk26@gmail.com) mới được
+                    lưu nội dung giao diện.
+                  </div>
+                )}
+                {CONTENT_FORM_GROUPS.map((group) => (
+                  <div key={group.title} className="space-y-3">
+                    <div className="text-xs font-semibold text-neutral-900 dark:text-white">{group.title}</div>
+                    <div className="grid grid-cols-1 gap-3">
+                      {group.fields.map(({ key, multiline }) => (
+                        <label key={key} className="block text-xs">
+                          <span className="text-neutral-600 dark:text-neutral-400">
+                            {CONTENT_FIELD_LABELS[key]} (tối đa {CONTENT_FIELD_LIMITS[key]} ký tự)
+                          </span>
+                          {multiline ? (
+                            <textarea
+                              rows={key === 'aboutBioLong' || key === 'heroSubtitle' ? 3 : 2}
+                              value={contentDrafts[key]}
+                              onChange={(e) => handleContentFieldChange(key, e.target.value)}
+                              disabled={!isAdmin}
+                              className="mt-1 w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-white disabled:opacity-60"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={contentDrafts[key]}
+                              onChange={(e) => handleContentFieldChange(key, e.target.value)}
+                              disabled={!isAdmin}
+                              className="mt-1 w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-white disabled:opacity-60"
+                            />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div className="space-y-3">
+                  <div className="text-xs font-semibold text-neutral-900 dark:text-white">Bảng giá — Mô tả ngắn từng gói</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {PACKAGE_FORM_META.map((p) => (
+                      <label key={p.id} className="block text-xs">
+                        <span className="text-neutral-600 dark:text-neutral-400">
+                          {p.name} (tối đa {CONTENT_FIELD_LIMITS.packageDescription} ký tự)
+                        </span>
+                        <textarea
+                          rows={2}
+                          value={contentDrafts.packageDescriptions[p.id]}
+                          onChange={(e) => handlePackageDescChange(p.id, e.target.value)}
+                          disabled={!isAdmin}
+                          className="mt-1 w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-white disabled:opacity-60"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                {contentErrors.length > 0 && (
+                  <div role="alert" className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 space-y-1">
+                    {contentErrors.map((err, i) => (
+                      <p key={i}>• {err}</p>
+                    ))}
+                  </div>
+                )}
+                {contentSaveMsg && (
+                  <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400">{contentSaveMsg}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveSiteContent}
+                    disabled={isSavingContent || !isAdmin}
+                    className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    {isSavingContent ? 'Đang lưu...' : 'Lưu nội dung'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetSiteContent}
+                    disabled={isSavingContent || !isAdmin}
+                    className="px-4 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    Khôi phục mặc định
+                  </button>
+                  <span className="text-xs text-neutral-500">
+                    {contentUpdatedAt
+                      ? `Lưu lần cuối: ${contentUpdatedAt}`
+                      : 'Chưa có thông tin lần lưu nội dung cuối.'}
+                  </span>
+                </div>
+              </div>
+
               {/* Service packages summary — sua duoc gia (luu qua onSavePackagePrices) */}
               <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
-                <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
-                  2. CÁC GÓI CHỤP ĐANG CÔNG KHAI TRÊN WEBSITE
+                <div className="text-xs font-sans tabular-nums uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
+                  3. CÁC GÓI CHỤP ĐANG CÔNG KHAI TRÊN WEBSITE
                 </div>
                 <p className="text-xs text-neutral-500">
                   Nhập giá mới (VNĐ, chỉ nhập số — ví dụ 650000 sẽ hiện 650.000), bấm "Lưu giá" để áp dụng cho toàn website.
@@ -1790,9 +2107,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             inputMode="numeric"
                             value={priceDrafts[p.id]}
                             onChange={(e) => handlePriceInputChange(p.id, e.target.value)}
-                            className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 dark:text-amber-400 font-semibold"
+                            disabled={!isAdmin}
+                            className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums text-amber-600 dark:text-amber-400 font-semibold disabled:opacity-60"
                           />
-                          <span className="text-neutral-500 font-mono shrink-0">đ</span>
+                          <span className="text-neutral-500 font-sans tabular-nums shrink-0">đ</span>
                         </span>
                       </label>
                     </div>
@@ -1807,9 +2125,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         inputMode="numeric"
                         value={extraDraft}
                         onChange={(e) => handleExtraInputChange(e.target.value)}
-                        className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 dark:text-amber-400 font-semibold"
+                        disabled={!isAdmin}
+                        className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-sans tabular-nums text-amber-600 dark:text-amber-400 font-semibold disabled:opacity-60"
                       />
-                      <span className="text-neutral-500 font-mono shrink-0">đ/người</span>
+                      <span className="text-neutral-500 font-sans tabular-nums shrink-0">đ/người</span>
                     </span>
                   </label>
                   <p className="text-neutral-500">
@@ -1830,7 +2149,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <button
                     type="button"
                     onClick={handleSavePackagePrices}
-                    disabled={isSavingPrices}
+                    disabled={isSavingPrices || !isAdmin}
                     className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-60"
                   >
                     {isSavingPrices ? 'Đang lưu...' : 'Lưu giá'}
@@ -1838,7 +2157,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <button
                     type="button"
                     onClick={handleResetPackagePrices}
-                    disabled={isSavingPrices}
+                    disabled={isSavingPrices || !isAdmin}
                     className="px-4 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md cursor-pointer disabled:opacity-60"
                   >
                     Khôi phục giá mặc định
@@ -1861,13 +2180,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* MODAL 1: EDIT LEAD NOTES & COUNSELING DETAIL */}
       {editingLead && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl p-6 space-y-5 animate-in fade-in">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-xl p-6 space-y-5 animate-in fade-in">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
               <div>
                 <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
                   Tư Vấn Khách Hàng: {editingLead.clientName}
                 </h3>
-                <p className="text-xs text-neutral-500 font-mono">
+                <p className="text-xs text-neutral-500 font-sans tabular-nums">
                   Mã #{editingLead.id} · Đăng ký lúc: {editingLead.createdAt}
                 </p>
               </div>
@@ -1881,7 +2200,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {/* Client summary */}
-            <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-mono">
+            <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-sans tabular-nums">
               <div className="flex justify-between">
                 <span className="text-neutral-500">Số Điện Thoại / Zalo:</span>
                 <span className="font-bold text-emerald-600 dark:text-emerald-400">{editingLead.phone}</span>
@@ -1977,13 +2296,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* MODAL 2: FULL EMAIL LOG PREVIEW */}
       {viewingEmailLog && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-2xl shadow-2xl p-6 space-y-4 animate-in fade-in max-h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-2xl shadow-xl p-6 space-y-4 animate-in fade-in max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
               <div>
                 <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
                   Chi Tiết Email Thông Báo Gửi Về
                 </h3>
-                <p className="text-xs text-neutral-500 font-mono">
+                <p className="text-xs text-neutral-500 font-sans tabular-nums">
                   Gửi tới: {viewingEmailLog.toEmail} · {viewingEmailLog.sentAt}
                 </p>
               </div>
@@ -1996,14 +2315,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-1 font-mono text-xs">
+            <div className="space-y-1 font-sans tabular-nums text-xs">
               <div className="text-neutral-500">TIÊU ĐỀ:</div>
               <div className="font-semibold text-neutral-900 dark:text-white p-2 bg-neutral-100 dark:bg-neutral-900 rounded">
                 {viewingEmailLog.subject}
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto font-mono text-xs p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap">
+            <div className="flex-1 overflow-y-auto font-sans tabular-nums text-xs p-4 bg-neutral-50 dark:bg-neutral-950 rounded-lg border border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap">
               {viewingEmailLog.fullBody}
             </div>
 
@@ -2046,7 +2365,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <form
             onSubmit={handleCreateManualLeadSubmit}
-            className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl p-6 space-y-4 animate-in fade-in"
+            className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-xl w-full max-w-lg shadow-xl p-6 space-y-4 animate-in fade-in"
           >
             <div className="flex items-center justify-between pb-3 border-b border-neutral-200 dark:border-neutral-800">
               <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">

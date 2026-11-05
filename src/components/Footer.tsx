@@ -4,13 +4,16 @@
  */
 
 import React from 'react';
-import { Camera, ArrowUp, Lock, Crown, LogOut, LayoutDashboard } from 'lucide-react';
+import { Camera, ArrowUp, Lock, Crown } from 'lucide-react';
+import { DEFAULT_SITE_CONTENT, type SiteContent } from '../config/content';
 
 interface FooterProps {
   isAdmin?: boolean;
   onOpenAdminLogin?: () => void;
   onToggleDashboard?: () => void;
   onLogoutAdmin?: () => void;
+  /** Noi dung giao dien (tu App / Firestore); khong truyen thi dung mac dinh. */
+  content?: SiteContent;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -18,59 +21,47 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenAdminLogin,
   onToggleDashboard,
   onLogoutAdmin,
+  content,
 }) => {
+  const c = content ?? DEFAULT_SITE_CONTENT;
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
-    <footer className="border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#09090b] text-neutral-600 dark:text-neutral-400 text-xs py-12 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          {/* Brand Wordmark */}
+    <footer className="border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0E0E10] text-neutral-600 dark:text-neutral-400 text-sm py-8 transition-colors">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* v7 — Footer 1 hang duy nhat: thuong hieu + tagline + len dau trang + cong admin */}
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 py-2">
           <div className="flex items-center gap-2.5">
             <Camera className="w-5 h-5 text-neutral-900 dark:text-white" />
             <span className="font-serif font-semibold text-lg tracking-wider text-neutral-900 dark:text-white uppercase">
-              YÊN PHOTO
+              Yên Photo
             </span>
-            <span className="text-neutral-400 font-mono text-[11px]">· PHOTOGRAPHY ARCHIVE</span>
+            <span className="hidden lg:inline text-sm text-neutral-500 dark:text-neutral-400">
+              — {c.footerTagline}
+            </span>
           </div>
 
-          {/* Link mang xa hoi: TAM AN — cac link truoc day chi tro ve trang
-              chu chung instagram.com / behance.net / vsco.co / 500px.com,
-              khong phai tai khoan cua Yen. Yen cung cap handle that thi them
-              lai o day. */}
-          {/* Back to top */}
-          <button
-            type="button"
-            onClick={scrollToTop}
-            className="flex items-center gap-1.5 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
-            aria-label="Cuộn lên đầu trang"
-          >
-            <span>Lên đầu trang</span>
-            <ArrowUp className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="pt-6 border-t border-neutral-100 dark:border-neutral-800/80 flex flex-col md:flex-row items-center justify-between gap-3 text-neutral-400 font-mono text-[11px]">
-          <div>
-            © 2026 Yên Photo. Mọi quyền được bảo lưu. Kỉ yếu & Áo dài Hà Nội.
-          </div>
-
-          {/* Admin Entry or Active Admin Status */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-5 text-sm">
+            <button
+              type="button"
+              onClick={scrollToTop}
+              className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
+              aria-label="Cuộn lên đầu trang"
+            >
+              <span>Lên đầu trang</span>
+              <ArrowUp className="w-3.5 h-3.5" />
+            </button>
             {isAdmin ? (
-              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <span className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
                 <Crown className="w-3.5 h-3.5" />
-                <span>Admin: Anh Yên</span>
-                <span className="text-neutral-300 dark:text-neutral-700">·</span>
                 <button
                   type="button"
                   onClick={onToggleDashboard}
-                  className="hover:underline flex items-center gap-1 text-neutral-700 dark:text-neutral-300 cursor-pointer"
+                  className="hover:underline cursor-pointer"
                 >
-                  <LayoutDashboard className="w-3 h-3" />
-                  <span>Vào Dashboard</span>
+                  Vào Dashboard
                 </button>
                 <span className="text-neutral-300 dark:text-neutral-700">·</span>
                 <button
@@ -78,17 +69,17 @@ export const Footer: React.FC<FooterProps> = ({
                   onClick={onLogoutAdmin}
                   className="hover:underline text-rose-500 cursor-pointer"
                 >
-                  Đăng Xuất
+                  Đăng xuất
                 </button>
-              </div>
+              </span>
             ) : (
               <button
                 type="button"
                 onClick={onOpenAdminLogin}
-                className="hover:text-neutral-900 dark:hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer text-neutral-400"
+                className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
               >
-                <Lock className="w-3 h-3" />
-                <span>Cổng Quản Trị Viên (Admin)</span>
+                <Lock className="w-3.5 h-3.5" />
+                <span>Quản trị</span>
               </button>
             )}
           </div>

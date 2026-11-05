@@ -69,12 +69,19 @@ import {
   loadPackagePricesMeta,
   savePackagePrices,
   subscribeToPackagePrices,
+  loadCachedSiteContent,
+  loadSiteContentMeta,
+  saveSiteContent,
+  subscribeToSiteContent,
+  SITE_CONTENT_CACHE_KEY,
+  SITE_CONTENT_UPDATED_AT_KEY,
   logoutUser,
   auth,
   onAuthStateChanged,
   loginWithGoogle,
   type User,
 } from './services/firebase';
+import { DEFAULT_SITE_CONTENT, type SiteContent } from './config/content';
 
 export default function App() {
   // Theme state: dark mode default for photography portfolio contrast
@@ -161,7 +168,12 @@ export default function App() {
   }, []);
 
   // Dashboard luu gia moi: ghi Firestore truoc, roi setState ngay (khong can F5).
+  // (v6) Chan them o App: chi userRole admin moi goi duoc (Dashboard cung
+  // chan, firebase.ts requireAdmin chan, rules chan tren Cloud).
   const handleSavePackagePrices = async (prices: PackagePrices) => {
+    if (userRole !== 'admin') {
+      throw new Error('Chỉ quản trị viên mới được đổi giá. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
+    }
     await savePackagePrices(prices);
     setPackagePrices(prices);
     const nowStr = new Date().toLocaleString('vi-VN', {
@@ -175,6 +187,73 @@ export default function App() {
     try {
       localStorage.setItem('yen_photo_package_prices', JSON.stringify(prices));
       localStorage.setItem('yen_photo_package_prices_updated_at', nowStr);
+    } catch {}
+  };
+
+  // (v6) Noi dung giao dien: cache localStorage truoc (mo trang hien ngay,
+  // khong trang), Firestore (settings/content) la nguon chinh, subscribe
+  // live de admin doi noi dung o Dashboard la web cap nhat ngay.
+  const [siteContent, setSiteContent] = useState<SiteContent>(() => loadCachedSiteContent());
+  const [contentUpdatedAt, setContentUpdatedAt] = useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem(SITE_CONTENT_UPDATED_AT_KEY) || undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    loadSiteContentMeta()
+      .then((meta) => {
+        if (!isMounted || !meta) return;
+        setSiteContent(meta.content);
+        if (meta.updatedAt) {
+          const d = new Date(meta.updatedAt);
+          if (!isNaN(d.getTime())) {
+            const s = d.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+            setContentUpdatedAt(s);
+            try { localStorage.setItem(SITE_CONTENT_UPDATED_AT_KEY, s); } catch {}
+          }
+        }
+        try {
+          localStorage.setItem(SITE_CONTENT_CACHE_KEY, JSON.stringify(meta.content));
+        } catch {}
+      })
+      .catch((e) => console.warn('Load site content warning:', e));
+    const unsub = subscribeToSiteContent((cloud) => {
+      if (!isMounted) return;
+      setSiteContent(cloud);
+      try {
+        localStorage.setItem(SITE_CONTENT_CACHE_KEY, JSON.stringify(cloud));
+      } catch {}
+    });
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, []);
+
+  // Dashboard luu noi dung moi: CHI ADMIN (chan o App truoc khi goi
+  // firebase.ts requireAdmin + rules tren Cloud). Ghi Firestore truoc,
+  // roi setState + cache ngay (khong can F5).
+  const handleSaveSiteContent = async (content: SiteContent) => {
+    if (userRole !== 'admin') {
+      throw new Error('Chỉ quản trị viên mới được sửa nội dung giao diện. Vui lòng đăng nhập Google bằng anhyenk26@gmail.com.');
+    }
+    await saveSiteContent(content);
+    setSiteContent(content);
+    const nowStr = new Date().toLocaleString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    setContentUpdatedAt(nowStr);
+    try {
+      localStorage.setItem(SITE_CONTENT_CACHE_KEY, JSON.stringify(content));
+      localStorage.setItem(SITE_CONTENT_UPDATED_AT_KEY, nowStr);
     } catch {}
   };
 
@@ -837,7 +916,7 @@ export default function App() {
   const unreadLeadsCount = leads.filter((l) => l.status === 'new').length;
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-[#09090b] text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-200">
+    <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#0E0E10] text-neutral-900 dark:text-neutral-100 flex flex-col font-sans transition-colors duration-200">
       {/* Strict 3-zone Top Bar Navigation */}
       <Navbar
         darkMode={darkMode}
@@ -898,6 +977,10 @@ export default function App() {
             packagePrices={packagePrices}
             pricingUpdatedAt={pricingUpdatedAt}
             onSavePackagePrices={handleSavePackagePrices}
+            isAdmin={userRole === 'admin'}
+            siteContent={siteContent}
+            contentUpdatedAt={contentUpdatedAt}
+            onSaveSiteContent={handleSaveSiteContent}
             onGoogleLogin={async () => {
               try {
                 await loginWithGoogle();
@@ -909,7 +992,7 @@ export default function App() {
         ) : (
           /* Access Restricted Gate for Unauthorized Visitors */
           <div className="flex-1 flex items-center justify-center p-6 text-center py-20">
-            <div className="max-w-md w-full p-8 rounded-2xl bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 shadow-2xl space-y-4">
+            <div className="max-w-md w-full p-8 rounded-2xl bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 shadow-xl space-y-4">
               <div className="w-14 h-14 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 mx-auto flex items-center justify-center border border-amber-300 dark:border-amber-800">
                 <Lock className="w-7 h-7" />
               </div>
@@ -946,6 +1029,7 @@ export default function App() {
               onExploreGallery={() => navigateToSection('gallery')}
               onSelectPhoto={(photo) => setSelectedPhotoForLightbox(photo)}
               onOpenBooking={() => setIsBookingOpen(true)}
+              content={siteContent}
             />
 
             {/* Gallery Archive with Multi-Layout & Unboxed Metadata */}
@@ -970,13 +1054,13 @@ export default function App() {
             />
 
             {/* Curated Monographs & Exhibitions Series */}
-            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} photos={photos} packagePrices={packagePrices} />
+            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} photos={photos} packagePrices={packagePrices} content={siteContent} />
 
             {/* About the Artist & In My Camera Bag Gear */}
-            <AboutSection />
+            <AboutSection content={siteContent} />
 
             {/* Consultation & Studio Contact */}
-            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} leads={leads} />
+            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} leads={leads} content={siteContent} />
           </main>
 
           {/* Minimalist Footer with discreet Admin Entry */}
@@ -985,6 +1069,7 @@ export default function App() {
             onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
             onToggleDashboard={handleToggleView}
             onLogoutAdmin={handleLogoutAdmin}
+            content={siteContent}
           />
         </>
       )}
@@ -1041,12 +1126,10 @@ export default function App() {
         onAddPhoto={handleAddCustomPhoto}
       />
 
-      {/* Client Proofing Portal Modal */}
+      {/* Client Proofing Portal Modal (v6: theo tung don, khong dung anh mau) */}
       <ClientProofingModal
         isOpen={isProofingOpen}
         onClose={() => setIsProofingOpen(false)}
-        samplePhotos={photos}
-        leads={leads}
       />
 
       {/* Admin Login Modal */}

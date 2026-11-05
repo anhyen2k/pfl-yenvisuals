@@ -16,6 +16,12 @@ service firebase.storage {
       allow write: if isAdmin() && request.resource.size < 8 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
+    // (v6) Anh proofing theo don: public read, CHI ADMIN write (<=8MB, image).
+    match /proofing/{leadId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
     match /{allPaths=**} {
       allow read, write: if false;
     }

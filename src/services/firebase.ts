@@ -19,24 +19,35 @@ import {
   getDoc,
   query,
   orderBy,
+  where,
+  limit,
   getDocFromServer,
 } from 'firebase/firestore';
 import {
   getStorage,
   ref,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
   deleteObject,
 } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { validatePackagePrices } from '../utils/portfolioLogic';
+import { validatePackagePrices, isAdminEmail } from '../utils/portfolioLogic';
+import {
+  DEFAULT_SITE_CONTENT,
+  mergeSiteContent,
+  validateSiteContent,
+  type SiteContent,
+} from '../config/content';
 import type {
   BookingLead,
   BookingStatus,
   EmailNotificationLog,
   PackagePrices,
   PhotoItem,
+  ProofingPhoto,
+  ProofingSelection,
 } from '../utils/portfolioLogic';
+import { PROOFING_QUERY_LIMIT } from '../utils/portfolioLogic';
 
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
@@ -48,35 +59,258 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 // Bucket lay tu firebase-applet-config.json (storageBucket da co san).
 export const storage = getStorage(app);
 
+export const MAX_PHOTO_DIMENSION = 1600;
+export const PHOTO_JPEG_QUALITY = 0.82;
+// File goc da nho thi khong nen lai: upload thang, vua nhanh vua giu chat luong goc.
+export const SKIP_COMPRESS_MAX_BYTES = 600 * 1024;
+
+// --- Toc do tai/xem anh (v6) ---
+/** Thumbnail: toi da 600px, WebP 0.75 — luoi Gallery/Proofing load ban nay. */
+export const THUMB_MAX_DIMENSION = 600;
+export const THUMB_WEBP_QUALITY = 0.75;
+/** Cache trinh duyet / CDN 1 nam cho anh da upload (file co ten duy nhat). */
+export const STORAGE_CACHE_CONTROL = 'public,max-age=31536000,immutable';
+
+/**
+ * Chan ghi admin o phia client (lop phong thu them, truoc ca firestore.rules
+ * / storage.rules tren Cloud): chi tai khoan Google anhyenk26@gmail.com
+ * moi duoc goi cac ham luu gia / noi dung / proofing / upload anh.
+ * Khach (guest) hoac tai khoan Google khac goi se throw ngay, khong cham
+ * toi Firestore/Storage. Ham nay KHONG dung cho luu lua chon proofing
+ * cua khach (public, xem saveProofingSelection).
+ */
+export function requireAdmin(): void {
+  if (!isAdminEmail(auth.currentUser?.email)) {
+    throw new Error('Chỉ quản trị viên (anhyenk26@gmail.com) mới được thực hiện thao tác này. Vui lòng đăng nhập Google bằng tài khoản admin.');
+  }
+}
+
+/**
+ * Tao thumbnail ~600px WebP quality 0.75 tu file/blob goc, dung chung cho
+ * anh portfolio + anh proofing. Tra ve null neu khong tao duoc (trinh duyet
+ * khong ho tro / anh loi) — ben goi fallback dung anh goc lam thumb.
+ */
+export async function makeThumbnailBlob(file: File | Blob): Promise<Blob | null> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return null;
+  try {
+    const { width, height } = bitmap;
+    const scale = Math.min(1, THUMB_MAX_DIMENSION / Math.max(width, height));
+    const targetW = Math.max(1, Math.round(width * scale));
+    const targetH = Math.max(1, Math.round(height * scale));
+    const resized = await createImageBitmap(bitmap, {
+      resizeWidth: targetW,
+      resizeHeight: targetH,
+    }).catch(() => null);
+    const source = resized ?? bitmap;
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0, targetW, targetH);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', THUMB_WEBP_QUALITY));
+    if (resized) resized.close();
+    // Trinh duyet khong xuat duoc WebP thi toBlob tra null — ben goi fallback.
+    return blob;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * Upload 1 blob len 1 duong dan Storage tuy y, co tien do % + cache 1 nam.
+ * Dung chung cho anh goc + thumbnail (portfolio + proofing).
+ */
+export async function uploadBlobToStorage(
+  blob: Blob,
+  storagePath: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  const storageRef = ref(storage, storagePath);
+  const task = uploadBytesResumable(storageRef, blob, {
+    contentType: blob.type || 'image/jpeg',
+    cacheControl: STORAGE_CACHE_CONTROL,
+  });
+  await new Promise<void>((resolve, reject) => {
+    task.on(
+      'state_changed',
+      (snapshot) => {
+        if (onProgress && snapshot.totalBytes > 0) {
+          onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+        }
+      },
+      (err) => reject(err),
+      () => resolve()
+    );
+  });
+  return getDownloadURL(storageRef);
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type = 'image/jpeg',
+  quality = PHOTO_JPEG_QUALITY
+): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function bitmapToJpeg(
+  bitmap: ImageBitmap,
+  width: number,
+  height: number
+): Promise<Blob | null> {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width));
+  canvas.height = Math.max(1, Math.round(height));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvasToBlob(canvas);
+}
+
+/**
+ * Nen anh xuong toi da 1600px (giu ti le), JPEG 0.82.
+ * - File goc da <=1600px va <=600KB: tra thang file goc, khong nen.
+ * - Uu tien resize native cua createImageBitmap (nhanh hon canvas drawImage);
+ *   anh rat lon thi ha bac (halve) truoc roi moi resize ve dich, tranh
+ *   drawImage 1 lan tu 6000px xuong 1600px bi cham / mo.
+ * - Trinh duyet khong ho tro resizeWidth thi fallback canvas nhu cu.
+ * Tra ve Blob da nen (hoac chinh file goc neu khong can nen / nen loi).
+ */
+export async function compressImageFile(file: File | Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+  // Khai bao ngoai try de finally dong duoc ca bitmap goc va anh da ha bac.
+  let source: ImageBitmap = bitmap;
+  try {
+    const { width, height } = bitmap;
+    if (width <= MAX_PHOTO_DIMENSION && height <= MAX_PHOTO_DIMENSION && file.size <= SKIP_COMPRESS_MAX_BYTES) {
+      return file;
+    }
+    const scale = Math.min(1, MAX_PHOTO_DIMENSION / Math.max(width, height));
+    const targetW = Math.max(1, Math.round(width * scale));
+    const targetH = Math.max(1, Math.round(height * scale));
+
+    // Buoc 1: ha bac neu can thu nho hon 1/2 (vd 6000px -> 3000px),
+    // dung resize native neu trinh duyet ho tro.
+    if (scale < 0.5) {
+      const halfW = Math.max(targetW, Math.round(width / 2));
+      const halfH = Math.max(targetH, Math.round(height / 2));
+      const halved = await createImageBitmap(file, {
+        resizeWidth: halfW,
+        resizeHeight: halfH,
+      }).catch(() => null);
+      if (halved) {
+        source = halved;
+      }
+    }
+
+    // Buoc 2: resize ve kich thuoc dich. Uu tien resize native tren source
+    // (la file goc hoac anh da ha bac); neu khong ho tro thi dung canvas.
+    if (source === bitmap) {
+      const resized = await createImageBitmap(file, {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+      }).catch(() => null);
+      if (resized) {
+        // Anh da dung kich thuoc dich: chuyen sang JPEG qua canvas nho
+        // (khong ve lai, chi doi dinh dang) — canvas 1600px nay re hon
+        // nhieu so voi ve tu anh goc 6000px.
+        const out = await bitmapToJpeg(resized, targetW, targetH);
+        resized.close();
+        if (out) return out;
+      }
+    } else {
+      const resized = await createImageBitmap(source, {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+      }).catch(() => null);
+      if (resized) {
+        const out = await bitmapToJpeg(resized, targetW, targetH);
+        resized.close();
+        if (out) return out;
+      }
+    }
+
+    // Fallback: canvas drawImage tu source (anh goc hoac anh da ha bac).
+    const out = await bitmapToJpeg(source, targetW, targetH);
+    if (out) return out;
+    return file;
+  } finally {
+    if (source !== bitmap) source.close();
+    bitmap.close();
+  }
+}
+
+/**
+ * Upload 1 blob (thuong la blob da nen san bang compressImageFile) len
+ * Storage, tra ve downloadURL. Dung uploadBytesResumable de co tien do %
+ * va tu tiep tuc khi mang dut giua chung, thay vi uploadBytes 1 lan.
+ * Ten file giu nguyen nhu cu: portfolio_photos/<photoId>.<ext>.
+ * Chi admin duoc upload (requireAdmin) + cache 1 nam (v6).
+ */
+export async function uploadCompressedPhoto(
+  blob: Blob,
+  photoId: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  requireAdmin();
+  const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+  return uploadBlobToStorage(blob, `portfolio_photos/${photoId}.${ext}`, onProgress);
+}
+
+/**
+ * (v6) Upload anh portfolio kem thumbnail: anh lon 1600px JPEG 0.82 +
+ * thumb ~600px WebP. Tra ve { url, thumbUrl } — thumb tao loi thi
+ * thumbUrl = url (fallback, Gallery van hien anh goc).
+ * Luu thumbUrl vao doc portfolio_photos de Gallery load thumb truoc.
+ */
+export async function uploadPhotoWithThumbnail(
+  file: File,
+  photoId: string,
+  onProgress?: (percent: number) => void,
+  /** Blob da nen san tu luc chon file (AddPhotoModal); co thi khong nen lai. */
+  precompressed?: Blob | null
+): Promise<{ url: string; thumbUrl: string }> {
+  requireAdmin();
+  const compressed = precompressed ?? (await compressImageFile(file));
+  const url = await uploadCompressedPhoto(compressed, photoId, (pct) =>
+    onProgress?.(Math.round(pct * 0.8))
+  );
+  let thumbUrl = url;
+  try {
+    const thumbBlob = await makeThumbnailBlob(file);
+    if (thumbBlob) {
+      thumbUrl = await uploadBlobToStorage(
+        thumbBlob,
+        `portfolio_photos/${photoId}_thumb.webp`,
+        (pct) => onProgress?.(80 + Math.round(pct * 0.2))
+      );
+    }
+  } catch (err) {
+    console.warn('Thumbnail upload warning (dung anh goc thay the):', err);
+  }
+  onProgress?.(100);
+  return { url, thumbUrl };
+}
+
 /**
  * Nen anh xuong toi da 1600px (giu ti le) roi upload len Storage, tra ve downloadURL.
  * KHONG luu base64 vao Firestore nua — Firestore gioi han truong image 50.000 ky tu.
  * Neu Storage chua deploy rules / upload loi thi throw, de giao dien bao loi ro
  * cho admin thay vi luu lang local roi tuong da len cloud.
+ * Luu y: modal nen goi compressImageFile() ngay khi chon file va
+ * uploadCompressedPhoto() khi bam Luu de spinner chi con upload; ham nay
+ * (nen + upload lien nhau) giu lai cho cac cho goi cu / truong hop chua nen san.
  */
-export async function uploadPhotoToStorage(file: File, photoId: string): Promise<string> {
-  const bitmap = await createImageBitmap(file).catch(() => null);
-  let blob: Blob = file;
-  if (bitmap) {
-    const maxDim = 1600;
-    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
-      if (out) blob = out;
-    }
-    bitmap.close();
-  }
-  // Phan mo rong theo dinh dang that cua blob sau khi nen (anh nen ra JPEG
-  // thi phai la .jpg, khong duoc ghi .png nhu file goc).
-  const ext = blob.type === 'image/png' ? 'png' : 'jpg';
-  const storageRef = ref(storage, `portfolio_photos/${photoId}.${ext}`);
-  await uploadBytes(storageRef, blob);
-  return getDownloadURL(storageRef);
+export async function uploadPhotoToStorage(
+  file: File,
+  photoId: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  const blob = await compressImageFile(file);
+  return uploadCompressedPhoto(blob, photoId, onProgress);
 }
 
 
@@ -461,9 +695,11 @@ export async function loadPackagePricesMeta(): Promise<PackagePricesMeta | null>
 }
 
 /**
- * Luu bang gia goi (chi admin goi; firestore.rules chan nguoi khac).
+ * Luu bang gia goi (chi admin goi; requireAdmin chan truoc o client,
+ * firestore.rules chan lai tren Cloud).
  */
 export async function savePackagePrices(prices: PackagePrices): Promise<void> {
+  requireAdmin();
   await setDoc(
     doc(db, 'settings', 'pricing'),
     {
@@ -497,3 +733,251 @@ export function subscribeToPackagePrices(cb: (p: PackagePrices) => void): () => 
   );
 }
 
+
+// --- Noi dung giao dien (v6, theo dung mau settings/pricing) ---
+// Doc `settings/content` luu { content: SiteContent, updatedAt, updatedBy }.
+// Public duoc doc (khach xem web), chi admin duoc ghi (requireAdmin o day
+// + firestore.rules tren Cloud). Cache localStorage `yen_photo_site_content`
+// de mo trang van hien noi dung ngay ca khi chua tai xong Cloud.
+export const SITE_CONTENT_CACHE_KEY = 'yen_photo_site_content';
+export const SITE_CONTENT_UPDATED_AT_KEY = 'yen_photo_site_content_updated_at';
+
+export function loadCachedSiteContent(): SiteContent {
+  try {
+    const saved = localStorage.getItem(SITE_CONTENT_CACHE_KEY);
+    if (saved) return mergeSiteContent(JSON.parse(saved));
+  } catch (e) {
+    console.warn('Failed to parse cached site content', e);
+  }
+  return { ...DEFAULT_SITE_CONTENT, packageDescriptions: { ...DEFAULT_SITE_CONTENT.packageDescriptions } };
+}
+
+/** Doc noi dung hien tai, hoac null neu chua co doc / du lieu khong hop le. */
+export async function loadSiteContent(): Promise<SiteContent | null> {
+  const snap = await getDoc(doc(db, 'settings', 'content'));
+  if (!snap.exists()) return null;
+  const content = (snap.data() as Record<string, unknown>).content;
+  if (!content || typeof content !== 'object') return null;
+  if (validateSiteContent(content).length > 0) return null;
+  return mergeSiteContent(content);
+}
+
+export interface SiteContentMeta {
+  content: SiteContent;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** Doc noi dung kem thoi gian luu lan cuoi (de Dashboard hien "Luu lan cuoi"). */
+export async function loadSiteContentMeta(): Promise<SiteContentMeta | null> {
+  const snap = await getDoc(doc(db, 'settings', 'content'));
+  if (!snap.exists()) return null;
+  const data = snap.data() as Record<string, unknown>;
+  const content = data.content;
+  if (!content || typeof content !== 'object') return null;
+  if (validateSiteContent(content).length > 0) return null;
+  return {
+    content: mergeSiteContent(content),
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : undefined,
+    updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : undefined,
+  };
+}
+
+/**
+ * Luu noi dung giao dien (CHI ADMIN; requireAdmin throw ngay neu khong
+ * phai anhyenk26@gmail.com — Dashboard goi ham nay qua App, va App kiem
+ * tra lai userRole truoc khi goi).
+ */
+export async function saveSiteContent(content: SiteContent): Promise<void> {
+  requireAdmin();
+  const errors = validateSiteContent(content);
+  if (errors.length > 0) {
+    throw new Error(errors.join(' '));
+  }
+  await setDoc(
+    doc(db, 'settings', 'content'),
+    {
+      content: mergeSiteContent(content),
+      updatedAt: new Date().toISOString(),
+      updatedBy: auth.currentUser?.email || '',
+    },
+    { merge: true }
+  );
+}
+
+/**
+ * Lang nghe noi dung giao dien theo thoi gian thuc. Chi goi cb khi doc ton
+ * tai va du lieu hop le. Tra ve ham unsubscribe.
+ */
+export function subscribeToSiteContent(cb: (c: SiteContent) => void): () => void {
+  return onSnapshot(
+    doc(db, 'settings', 'content'),
+    (snapshot) => {
+      if (!snapshot.exists()) return;
+      const content = (snapshot.data() as Record<string, unknown>).content;
+      if (!content || typeof content !== 'object') return;
+      if (validateSiteContent(content).length > 0) return;
+      cb(mergeSiteContent(content));
+    },
+    (error) => {
+      console.warn('Site content subscription warning:', error);
+    }
+  );
+}
+
+// --- Proofing theo tung don (v6) ---
+// Collection `proofing_photos` (1 doc / 1 anh), `proofing_selections`
+// (1 doc / 1 ma don, id = leadId). Rules (firestore.rules):
+// - proofing_photos: public read, CHI ADMIN write.
+// - proofing_selections: public chi doc dung doc theo ma minh nhap (get,
+//   KHONG list), create/update neu leadId trong du lieu == id doc;
+//   delete + list chi admin. Khach khong doc duoc lua chon cua don khac
+//   vi khong list duoc va khong biet ma don do.
+// - booking_leads KHONG mo read cong khai: khach xac minh bang ma don +
+//   4 so cuoi SDT luu kem moi anh proofing (phoneSuffix).
+
+function toProofingPhoto(id: string, data: Record<string, unknown>): ProofingPhoto {
+  return {
+    id,
+    leadId: typeof data.leadId === 'string' ? data.leadId : '',
+    url: typeof data.url === 'string' ? data.url : '',
+    thumbUrl: typeof data.thumbUrl === 'string' ? data.thumbUrl : undefined,
+    order: typeof data.order === 'number' ? data.order : 0,
+    phoneSuffix: typeof data.phoneSuffix === 'string' ? data.phoneSuffix : '',
+    createdAt: typeof data.createdAt === 'string' ? data.createdAt : '',
+  };
+}
+
+/**
+ * Tai anh proofing cua 1 don: query where leadId == ma (chu hoa), order
+ * theo `order`, limit 50. Neu Firestore bao thieu composite index
+ * (failed-precondition) thi fallback: query khong orderBy roi sap xep
+ * o client — anh van hien dung thu tu, Yen tao index theo link trong
+ * thong bao loi Firebase Console khi ranh (xem PAGES-NOTES-V6.md).
+ */
+export async function fetchProofingPhotos(leadId: string): Promise<ProofingPhoto[]> {
+  const code = (leadId || '').trim().toUpperCase();
+  const col = collection(db, 'proofing_photos');
+  try {
+    const q = query(col, where('leadId', '==', code), orderBy('order'), limit(PROOFING_QUERY_LIMIT));
+    const snap = await getDocs(q);
+    const items: ProofingPhoto[] = [];
+    snap.forEach((d) => items.push(toProofingPhoto(d.id, d.data() as Record<string, unknown>)));
+    return items;
+  } catch (err: any) {
+    if (err?.code !== 'failed-precondition') throw err;
+    console.warn('Proofing query can composite index, dung fallback sap xep o client:', err?.message);
+    const snap = await getDocs(query(col, where('leadId', '==', code), limit(PROOFING_QUERY_LIMIT)));
+    const items: ProofingPhoto[] = [];
+    snap.forEach((d) => items.push(toProofingPhoto(d.id, d.data() as Record<string, unknown>)));
+    items.sort((a, b) => a.order - b.order);
+    return items;
+  }
+}
+
+/** Luu 1 doc anh proofing (chi admin; goi sau khi upload file len Storage). */
+export async function saveProofingPhotoToCloud(photo: ProofingPhoto): Promise<void> {
+  requireAdmin();
+  await setDoc(doc(db, 'proofing_photos', photo.id), photo, { merge: true });
+}
+
+/**
+ * (v6) Upload 1 anh proofing cho 1 don: nen ve 1600px JPEG 0.82 + thumb
+ * ~600px WebP, up len Storage `proofing/<LEADID>/<photoId>.jpg` (+ thumb
+ * `_thumb.webp`), cache 1 nam, ghi doc Firestore kem phoneSuffix.
+ * Tra ve ProofingPhoto da luu. Chi admin duoc goi.
+ */
+export async function uploadProofingPhoto(
+  file: File,
+  leadId: string,
+  phoneSuffix: string,
+  order: number,
+  onProgress?: (percent: number) => void
+): Promise<ProofingPhoto> {
+  requireAdmin();
+  const code = (leadId || '').trim().toUpperCase();
+  const photoId = `proof-${code}-${Date.now()}-${Math.floor(10 + Math.random() * 90)}`;
+  const compressed = await compressImageFile(file);
+  const ext = compressed.type === 'image/png' ? 'png' : 'jpg';
+  const url = await uploadBlobToStorage(compressed, `proofing/${code}/${photoId}.${ext}`, (pct) =>
+    onProgress?.(Math.round(pct * 0.8))
+  );
+  let thumbUrl = url;
+  try {
+    const thumbBlob = await makeThumbnailBlob(file);
+    if (thumbBlob) {
+      thumbUrl = await uploadBlobToStorage(thumbBlob, `proofing/${code}/${photoId}_thumb.webp`, (pct) =>
+        onProgress?.(80 + Math.round(pct * 0.2))
+      );
+    }
+  } catch (err) {
+    console.warn('Proofing thumbnail upload warning (dung anh goc thay the):', err);
+  }
+  onProgress?.(100);
+  const photo: ProofingPhoto = {
+    id: photoId,
+    leadId: code,
+    url,
+    thumbUrl,
+    order,
+    phoneSuffix: (phoneSuffix || '').replace(/[^0-9]/g, '').slice(-4),
+    createdAt: new Date().toISOString(),
+  };
+  await saveProofingPhotoToCloud(photo);
+  return photo;
+}
+
+/**
+ * Xoa 1 anh proofing: xoa doc Firestore + file goc + thumb tren Storage.
+ * File da mat truoc do thi coi nhu xoa xong. Chi admin duoc goi.
+ */
+export async function deleteProofingPhoto(photo: ProofingPhoto): Promise<void> {
+  requireAdmin();
+  await deleteDoc(doc(db, 'proofing_photos', photo.id));
+  const base = `proofing/${photo.leadId}/${photo.id}`;
+  for (const path of [`${base}.jpg`, `${base}.png`, `${base}_thumb.webp`]) {
+    try {
+      await deleteObject(ref(storage, path));
+    } catch (err: any) {
+      if (err?.code === 'storage/object-not-found') continue;
+      console.warn('Proofing storage delete warning:', path, err);
+    }
+  }
+}
+
+/** Doc lua chon cua khach cho 1 don (null neu khach chua gui). */
+export async function loadProofingSelection(leadId: string): Promise<ProofingSelection | null> {
+  const code = (leadId || '').trim().toUpperCase();
+  const snap = await getDoc(doc(db, 'proofing_selections', code));
+  if (!snap.exists()) return null;
+  const data = snap.data() as Record<string, unknown>;
+  return {
+    leadId: code,
+    selectedIds: Array.isArray(data.selectedIds) ? (data.selectedIds as string[]) : [],
+    ratings: (data.ratings as Record<string, number>) || {},
+    notes: (data.notes as Record<string, string>) || {},
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
+  };
+}
+
+/**
+ * Khach gui lua chon len Cloud. Day la ham PUBLIC (khach khong dang nhap):
+ * ghi doc co id = ma don, kem leadId == id doc — firestore.rules chi cho
+ * create/update khi 2 gia tri nay khop, cam list/delete. KHONG goi
+ * requireAdmin o day.
+ */
+export async function saveProofingSelection(selection: ProofingSelection): Promise<void> {
+  const code = (selection.leadId || '').trim().toUpperCase();
+  if (!code) throw new Error('Thiếu mã đơn.');
+  await setDoc(
+    doc(db, 'proofing_selections', code),
+    {
+      leadId: code,
+      selectedIds: selection.selectedIds,
+      ratings: selection.ratings,
+      notes: selection.notes,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+}

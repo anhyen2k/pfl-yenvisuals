@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Camera,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
 import { PHOTO_SERIES } from '../data/portfolioData';
-import { uploadPhotoToStorage } from '../services/firebase';
+import { compressImageFile, uploadCompressedPhoto } from '../services/firebase';
 
 interface EditPhotoModalProps {
   isOpen: boolean;
@@ -37,17 +37,32 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
   const [formData, setFormData] = useState<PhotoItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [tagsInput, setTagsInput] = useState('');
-  // File moi nguoi dung chon de thay anh: chi upload khi submit, khong luu base64.
+  // File moi nguoi dung chon de thay anh: nen ngay khi chon (khong doi den
+  // luc bam Luu), chi upload blob da nen khi submit.
   const [newFile, setNewFile] = useState<File | null>(null);
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('');
   const [newPreview, setNewPreview] = useState('');
+  const previewUrlRef = useRef('');
   const [error, setError] = useState('');
   const [imageBroken, setImageBroken] = useState(false);
+
+  // Thu hoi object URL preview khi dong modal / unmount, tranh ro bo nho.
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (photo) {
       setFormData({ ...photo });
       setTagsInput(photo.tags ? photo.tags.join(', ') : '');
       setNewFile(null);
+      setCompressedBlob(null);
+      setIsCompressing(false);
+      setSaveStatus('');
       setNewPreview('');
       setError('');
       setImageBroken(false);
@@ -92,43 +107,60 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
     setFormData((prev) => (prev ? { ...prev, tags: parsedTags } : null));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
       setError('Kích thước ảnh không vượt quá 8MB');
       return;
     }
-    // Giu File goc de upload len Storage khi submit; preview base64 chi de xem truoc.
+    // Preview nhe bang object URL thay cho FileReader base64 (nang hon ~33%).
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    const previewUrl = URL.createObjectURL(file);
+    previewUrlRef.current = previewUrl;
+    setNewPreview(previewUrl);
     setNewFile(file);
     setImageBroken(false);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setNewPreview(reader.result);
-        setError('');
-      }
-    };
-    reader.readAsDataURL(file);
+    setError('');
+    // Nen ngay khi chon file (trong luc Yen sua tieu de/mo ta), de luc bam
+    // Luu chi con upload blob da nen san. Nen loi thi dung thang file goc.
+    setIsCompressing(true);
+    try {
+      const blob = await compressImageFile(file);
+      setCompressedBlob(blob);
+    } catch {
+      setCompressedBlob(file);
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const clearNewFile = () => {
     setNewFile(null);
+    setCompressedBlob(null);
+    setIsCompressing(false);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = '';
+    }
     setNewPreview('');
   };
 
   const handleSubmit = async (e: React.FormEvent | React.MouseEvent) => {
     e.preventDefault();
-    if (!formData) return;
+    if (!formData || isCompressing) return;
     setIsSaving(true);
     setError('');
     try {
       let updatedPhoto = formData;
       if (newFile) {
-        // Co file moi: upload len Firebase Storage lay downloadURL lam anh moi.
+        // Blob da nen san tu luc chon file: chi con upload + lay downloadURL.
         let downloadURL: string;
         try {
-          downloadURL = await uploadPhotoToStorage(newFile, formData.id);
+          setSaveStatus('Đang tải lên 0%...');
+          downloadURL = await uploadCompressedPhoto(compressedBlob ?? newFile, formData.id, (pct) => {
+            setSaveStatus(`Đang tải lên ${pct}%...`);
+          });
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
           setError(
@@ -137,12 +169,14 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
           setIsSaving(false);
           return;
         }
+        setSaveStatus('Đang lưu thông tin...');
         updatedPhoto = { ...formData, image: downloadURL };
       }
       onSave(updatedPhoto);
       onClose();
     } finally {
       setIsSaving(false);
+      setSaveStatus('');
     }
   };
 
@@ -153,7 +187,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
       aria-label="Sửa thông tin ảnh"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in"
     >
-      <div className="bg-white dark:bg-[#0e0e11] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white dark:bg-[#0e0e11] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-3xl shadow-xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -164,7 +198,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
               <h3 className="text-base font-serif font-bold text-neutral-900 dark:text-white">
                 Chỉnh Sửa Thông Tin Bức Ảnh
               </h3>
-              <p className="text-xs text-neutral-500 font-mono">
+              <p className="text-xs text-neutral-500 font-sans tabular-nums">
                 Mã ảnh: #{formData.id} · Đồng bộ lưu vĩnh viễn trên Cloud Firestore
               </p>
             </div>
@@ -209,7 +243,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                 </div>
               )}
               <div className="absolute inset-0 bg-black/40 flex items-end p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-[11px] text-white font-mono truncate">{formData.title}</span>
+                <span className="text-xs text-white font-sans tabular-nums truncate">{formData.title}</span>
               </div>
             </div>
 
@@ -228,7 +262,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                       onChange={handleChange}
                       required
                       placeholder="https://..."
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-mono"
+                      className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-sans tabular-nums"
                     />
                   </div>
                 </div>
@@ -242,7 +276,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                 {newPreview ? (
                   <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
                     <Check className="w-4 h-4" />
-                    <span>Đã chọn ảnh mới — sẽ tải lên Storage khi bấm Lưu.</span>
+                    <span>
+                      {isCompressing
+                        ? 'Đang nén ảnh...'
+                        : 'Đã nén xong — sẵn sàng tải lên khi bấm Lưu.'}
+                    </span>
                     <button
                       type="button"
                       onClick={clearNewFile}
@@ -366,7 +404,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Máy ảnh
                 </label>
                 <input
@@ -375,11 +413,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.camera}
                   onChange={handleChange}
                   placeholder="Sony Alpha 7 Mark III"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Ống kính (Lens)
                 </label>
                 <input
@@ -388,11 +426,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.lens}
                   onChange={handleChange}
                   placeholder="FE 85mm f/1.8"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Khẩu độ
                 </label>
                 <input
@@ -401,11 +439,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.aperture}
                   onChange={handleChange}
                   placeholder="f/1.4"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Tốc độ màn trập
                 </label>
                 <input
@@ -414,14 +452,14 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.shutterSpeed}
                   onChange={handleChange}
                   placeholder="1/800s"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   ISO
                 </label>
                 <input
@@ -430,11 +468,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.iso}
                   onChange={handleChange}
                   placeholder="100"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Tiêu cự (Focal Length)
                 </label>
                 <input
@@ -443,11 +481,11 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.focalLength}
                   onChange={handleChange}
                   placeholder="85mm"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Năm thực hiện
                 </label>
                 <input
@@ -456,18 +494,18 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
                   value={formData.year}
                   onChange={handleChange}
                   placeholder="2026"
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-mono uppercase text-neutral-500 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-500 mb-1">
                   Khung tỉ lệ ảnh
                 </label>
                 <select
                   name="aspectRatio"
                   value={formData.aspectRatio}
                   onChange={handleChange}
-                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-mono"
+                  className="w-full px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white font-sans tabular-nums"
                 >
                   <option value="3:4">3:4 (Dọc tiêu chuẩn)</option>
                   <option value="16:9">16:9 (Ngang điện ảnh)</option>
@@ -555,11 +593,13 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSaving}
+            disabled={isSaving || isCompressing}
             className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
-            <span>{isSaving ? 'Đang lưu...' : 'Lưu Thay Đổi Lên Đám Mây'}</span>
+            <span>
+              {isCompressing ? 'Đang nén ảnh...' : isSaving ? saveStatus || 'Đang lưu...' : 'Lưu Thay Đổi Lên Đám Mây'}
+            </span>
           </button>
         </div>
       </div>

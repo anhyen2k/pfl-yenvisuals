@@ -3,9 +3,12 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-serif: "Cormorant Garamond", Georgia, serif;
-  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  /* v7 — chi 2 ho font, ca 2 deu ho tro tieng Viet day du (subset vietnamese).
+     Fraunces: serif editorial cho tieu de. Be Vietnam Pro: grotesque lam
+     rieng cho tieng Viet cho moi chu giao dien. Khong con font mono rieng:
+     so tien / ma don dung Be Vietnam Pro + tabular-nums. */
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-sans: "Be Vietnam Pro", system-ui, -apple-system, sans-serif;
 }
 
 /* Dai chu chay cuoi Hero: marquee lien mach (noi dung nhan doi,
@@ -34,6 +37,13 @@ html {
   scroll-behavior: smooth;
   font-family: var(--font-sans);
 }
+
+body {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+/* Tieu de lon dung Fraunces voi optical sizing mac dinh cua bien the. */
 
 /* Custom thin scrollbars for sleek minimalist aesthetic */
 ::-webkit-scrollbar {

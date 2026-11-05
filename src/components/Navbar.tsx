@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Camera, Sun, Moon, Plus, Menu, X, Heart, ShieldCheck, Mail, Lock, LogOut, Crown } from 'lucide-react';
+import { Camera, Sun, Moon, Plus, Menu, X, ShieldCheck, Mail, Lock, LogOut } from 'lucide-react';
 import { UserRole } from '../utils/portfolioLogic';
 import { navigateHome, navigateToSection, pathForSectionId, withBase } from '../utils/cleanPaths';
 
@@ -45,8 +45,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isAdmin = userRole === 'admin';
 
   return (
-    <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#09090b]/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between gap-4 sm:gap-8">
+    <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#0E0E10]/90 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand wordmark */}
         <a
           href={withBase('/')}
@@ -100,7 +100,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </a>
             </>
           ) : (
-            <div className="text-xs font-mono text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-2">
+            <div className="text-xs font-sans tabular-nums text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <span>Chế Độ Quản Trị Website & Tư Vấn Khách</span>
             </div>
@@ -112,12 +112,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* ADMIN-ONLY CONTROLS */}
           {isAdmin ? (
             <div className="flex items-center gap-1.5 sm:gap-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 p-1 sm:p-1.5 rounded-lg">
-              {/* Admin identity badge */}
-              <div className="hidden lg:flex items-center gap-1 text-[11px] font-mono text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded bg-amber-100/70 dark:bg-amber-900/60 font-semibold">
-                <Crown className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                <span>Admin (Anh Yên)</span>
-              </div>
-
               {/* Dashboard Switcher */}
               <button
                 type="button"
@@ -130,11 +124,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title={currentView === 'dashboard' ? 'Quay lại xem trang portfolio' : 'Mở bảng điều khiển quản lý và xem đơn đăng ký'}
               >
                 <span>{currentView === 'dashboard' ? '← Xem Web' : 'Dashboard'}</span>
-                {currentView === 'portfolio' && unreadLeadsCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono font-bold">
-                    {unreadLeadsCount}
-                  </span>
-                )}
               </button>
 
               {/* Add photo button (Admin only) */}
@@ -161,33 +150,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           ) : null}
 
-          {/* CLIENT ACTIONS (Visible when viewing portfolio) */}
-          {currentView === 'portfolio' && (
-            <>
-              {/* Favorites toggle for clients */}
-              <button
-                type="button"
-                onClick={onFilterFavorites}
-                className={`p-1.5 sm:p-2 rounded-md transition-colors flex items-center gap-1 text-xs font-medium cursor-pointer ${
-                  showingFavoritesOnly
-                    ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                }`}
-                title="Xem danh sách ảnh đã thích"
-                aria-label="Danh sách yêu thích"
-              >
-                <Heart
-                  className={`w-4 h-4 ${
-                    showingFavoritesOnly ? 'fill-rose-500 text-rose-500' : ''
-                  }`}
-                />
-                {favoritesCount > 0 && (
-                  <span className="font-mono text-xs">{favoritesCount}</span>
-                )}
-              </button>
-            </>
-          )}
-
           {/* Dark/Light mode toggle */}
           <button
             type="button"
@@ -204,7 +166,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={onOpenBooking}
-              className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold tracking-wider uppercase text-white bg-neutral-900 hover:bg-neutral-800 dark:text-neutral-900 dark:bg-neutral-100 dark:hover:bg-white rounded-md shadow-xs transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-xs font-semibold tracking-wider uppercase text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Mail className="w-3.5 h-3.5" />
               <span>Đặt Lịch</span>
@@ -226,13 +188,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#09090b] px-4 pt-3 pb-5 space-y-2">
+        <div className="md:hidden border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0E0E10] px-4 pt-3 pb-5 space-y-2">
           {/* Admin Controls in Mobile Menu */}
           {isAdmin && (
             <div className="p-3 mb-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 space-y-2">
-              <div className="flex items-center justify-between text-xs font-mono text-amber-800 dark:text-amber-300 font-semibold">
+              <div className="flex items-center justify-between text-xs font-sans tabular-nums text-amber-800 dark:text-amber-300 font-semibold">
                 <span className="flex items-center gap-1">
-                  <Crown className="w-3.5 h-3.5 text-amber-600" />
                   Quản Trị Viên (Anh Yên)
                 </span>
                 <button
@@ -240,7 +201,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setMobileMenuOpen(false);
                     onLogoutAdmin();
                   }}
-                  className="text-neutral-500 hover:text-rose-600 text-[11px] flex items-center gap-1"
+                  className="text-neutral-500 hover:text-rose-600 text-xs flex items-center gap-1"
                 >
                   <LogOut className="w-3 h-3" />
                   Đăng xuất

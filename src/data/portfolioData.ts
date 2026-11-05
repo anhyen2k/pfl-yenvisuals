@@ -327,7 +327,7 @@ function createAoDaiArtSvg(
   const svgString = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
       ${content}
-      <text x="30" y="570" font-family="'Plus Jakarta Sans', sans-serif" font-size="11" font-weight="500" fill="#ffffff" letter-spacing="1" opacity="0.85">YÊN PHOTO · ${title.toUpperCase()}</text>
+      <text x="30" y="570" font-family="'Be Vietnam Pro', sans-serif" font-size="11" font-weight="500" fill="#ffffff" letter-spacing="1" opacity="0.85">YÊN PHOTO · ${title.toUpperCase()}</text>
     </svg>
   `.trim();
 

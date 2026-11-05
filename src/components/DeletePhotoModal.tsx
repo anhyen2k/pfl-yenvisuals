@@ -44,7 +44,7 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
       aria-label="Xác nhận xoá ảnh"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
     >
-      <div className="bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden p-6 text-neutral-900 dark:text-white space-y-4">
+      <div className="bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-md shadow-xl overflow-hidden p-6 text-neutral-900 dark:text-white space-y-4">
         {/* Header Icon */}
         <div className="flex items-start justify-between">
           <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-300 dark:border-red-800/80">
@@ -79,7 +79,7 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
                 onError={() => setImageBroken(true)}
               />
             ) : (
-              <span className="text-[10px] text-neutral-400 text-center px-1">Chưa có ảnh</span>
+              <span className="text-xs text-neutral-400 text-center px-1">Chưa có ảnh</span>
             )}
           </div>
           <div className="min-w-0 flex-1">
@@ -87,9 +87,9 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
               {photo.title}
             </h4>
             {photo.vietnameseTitle && (
-              <p className="text-[11px] text-neutral-500 truncate">{photo.vietnameseTitle}</p>
+              <p className="text-xs text-neutral-500 truncate">{photo.vietnameseTitle}</p>
             )}
-            <div className="flex items-center gap-2 mt-1 text-[10px] text-neutral-400 font-mono">
+            <div className="flex items-center gap-2 mt-1 text-xs text-neutral-400 font-sans tabular-nums">
               <span>{photo.location}</span>
               <span>·</span>
               <span>{photo.camera}</span>
@@ -99,7 +99,7 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
 
         <div className="space-y-2">
           {photo.featured && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+            <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
               <span>
                 Ảnh này đang là ảnh nổi bật (Hero). Xoá xong trang chủ sẽ dùng ảnh khác.
@@ -107,12 +107,12 @@ export const DeletePhotoModal: React.FC<DeletePhotoModalProps> = ({
             </div>
           )}
           {photo.seriesId && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+            <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
               <span>Ảnh thuộc series: {seriesTitle || photo.seriesId}.</span>
             </div>
           )}
-          <div className="flex items-center gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
+          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-2.5 rounded-lg">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>Không hoàn tác được sau khi xoá.</span>
           </div>

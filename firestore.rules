@@ -53,9 +53,73 @@ service cloud.firestore {
 
     // Bang gia goi (settings/pricing): ai cung doc duoc, chi admin duoc ghi,
     // du lieu khong hop le (ngoai gioi han gia) thi deny.
-    match /settings/{docId} {
+    // (v6) TACH RIENG pricing / content: rule cu bat moi doc settings phai
+    // co `prices` nen doc content se bi chan. Ca 2 doc deu: public read,
+    // CHI ADMIN create/update/delete.
+    match /settings/pricing {
       allow get, list: if true;
       allow create, update: if isAdmin() && isValidPricing(incoming());
+      allow delete: if isAdmin();
+    }
+
+    function isValidContent(data) {
+      return data.keys().hasAll(['content'])
+        && data.content is map
+        && (!('heroTitle' in data.content) || (data.content.heroTitle is string && data.content.heroTitle.size() <= 200))
+        && (!('heroSubtitle' in data.content) || (data.content.heroSubtitle is string && data.content.heroSubtitle.size() <= 500))
+        && (!('heroPrimaryCta' in data.content) || (data.content.heroPrimaryCta is string && data.content.heroPrimaryCta.size() <= 100))
+        && (!('heroSecondaryCta' in data.content) || (data.content.heroSecondaryCta is string && data.content.heroSecondaryCta.size() <= 100))
+        && (!('marqueeText' in data.content) || (data.content.marqueeText is string && data.content.marqueeText.size() <= 500))
+        && (!('aboutName' in data.content) || (data.content.aboutName is string && data.content.aboutName.size() <= 100))
+        && (!('aboutRole' in data.content) || (data.content.aboutRole is string && data.content.aboutRole.size() <= 200))
+        && (!('aboutBioShort' in data.content) || (data.content.aboutBioShort is string && data.content.aboutBioShort.size() <= 500))
+        && (!('aboutBioLong' in data.content) || (data.content.aboutBioLong is string && data.content.aboutBioLong.size() <= 500))
+        && (!('contactAreas' in data.content) || (data.content.contactAreas is string && data.content.contactAreas.size() <= 500))
+        && (!('contactHours' in data.content) || (data.content.contactHours is string && data.content.contactHours.size() <= 200))
+        && (!('contactNote' in data.content) || (data.content.contactNote is string && data.content.contactNote.size() <= 500))
+        && (!('footerTagline' in data.content) || (data.content.footerTagline is string && data.content.footerTagline.size() <= 200))
+        && (!('packageDescriptions' in data.content) || data.content.packageDescriptions is map);
+    }
+
+    // Noi dung giao dien (settings/content, v6): public read, CHI ADMIN ghi.
+    match /settings/content {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidContent(incoming());
+      allow delete: if isAdmin();
+    }
+
+    function isValidProofingPhoto(data) {
+      return data.keys().hasAll(['leadId', 'url', 'order', 'phoneSuffix'])
+        && data.leadId is string && data.leadId.matches('^KY-[A-Z0-9]+$')
+        && data.url is string && data.url.size() > 0 && data.url.size() <= 2000
+        && data.order is number
+        && data.phoneSuffix is string && data.phoneSuffix.size() == 4
+        && (!('thumbUrl' in data) || (data.thumbUrl is string && data.thumbUrl.size() <= 2000));
+    }
+
+    // Anh proofing theo don (v6): public read, CHI ADMIN write.
+    match /proofing_photos/{photoId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidId(photoId) && isValidProofingPhoto(incoming());
+      allow delete: if isAdmin() && isValidId(photoId);
+    }
+
+    function isValidProofingSelection(data, leadId) {
+      return data.keys().hasAll(['leadId', 'selectedIds', 'ratings', 'notes'])
+        && data.leadId == leadId
+        && data.selectedIds is list
+        && data.ratings is map
+        && data.notes is map;
+    }
+
+    // Lua chon cua khach (v6): public CHI DUOC get dung doc theo ma don
+    // minh nhap (khong list toan bo) va create/update doc do — voi dieu
+    // kien leadId trong du lieu phai == id doc (khong ghi de doc don khac).
+    // Delete + list chi admin. Ma don + 4 so cuoi SDT la "mat khau".
+    match /proofing_selections/{leadId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update: if isValidId(leadId) && isValidProofingSelection(incoming(), leadId);
       allow delete: if isAdmin();
     }
 

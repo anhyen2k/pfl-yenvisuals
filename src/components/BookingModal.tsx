@@ -399,13 +399,13 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       aria-label="Đặt lịch chụp kỉ yếu & áo dài"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in"
     >
-      <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <GraduationCap className="w-5 h-5 text-amber-600 dark:text-amber-400" />
             <div>
-              <h3 className="text-lg font-serif font-medium text-neutral-900 dark:text-white">
+              <h3 className="text-2xl font-serif font-medium text-neutral-900 dark:text-white">
                 Đặt Lịch Chụp Kỉ Yếu & Áo Dài (Sony A7 Mark III)
               </h3>
               <p className="text-xs text-neutral-500">
@@ -432,7 +432,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             </div>
 
             <div className="space-y-2">
-              <span className="text-xs font-mono uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+              <span className="text-xs font-sans tabular-nums uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
                 ĐÃ GHI NHẬN LỊCH HẸN THÀNH CÔNG
               </span>
               <h3 className="text-2xl font-serif text-neutral-900 dark:text-white">
@@ -443,7 +443,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 <strong className="text-neutral-900 dark:text-white">{submittedBooking.inquiry.phone}</strong> và gửi báo giá qua email{' '}
                 <strong className="text-neutral-900 dark:text-white">{submittedBooking.inquiry.email}</strong> sớm nhất trong ngày.
               </p>
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs font-sans tabular-nums text-emerald-700 dark:text-emerald-400">
                 <Mail className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>{submittedBooking.emailStatusMsg}</span>
               </div>
@@ -459,7 +459,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             </div>
 
             {/* Voucher Card */}
-            <div className="p-5 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-left space-y-3 font-mono text-xs">
+            <div className="p-5 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-left space-y-3 font-sans tabular-nums text-xs">
               <div className="flex justify-between items-center pb-2 border-b border-neutral-200 dark:border-neutral-800">
                 <span className="text-neutral-500">MÃ XÁC NHẬN</span>
                 <span className="font-semibold text-amber-600 dark:text-amber-400">{submittedBooking.id}</span>
@@ -554,9 +554,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       aria-current={active ? 'step' : undefined}
                     >
                       <span
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                           active
-                            ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                            ? 'bg-amber-600 text-white'
                             : done
                               ? 'bg-amber-600 text-white'
                               : 'bg-neutral-200 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
@@ -565,7 +565,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                         {done ? '✓' : n}
                       </span>
                       <span
-                        className={`truncate text-[11px] sm:text-xs ${
+                        className={`truncate text-xs sm:text-xs ${
                           active
                             ? 'font-semibold text-neutral-900 dark:text-white'
                             : 'text-neutral-500 dark:text-neutral-400'
@@ -586,7 +586,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
               <div className="space-y-5">
                 {/* Package Selector */}
                 <div className="space-y-2">
-                <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                <label className="block text-xs font-sans tabular-nums uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
                 Lựa chọn gói chụp kỉ yếu / áo dài *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -620,11 +620,11 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 <span className="text-neutral-900 dark:text-white font-serif text-sm">
                 {currentPackageDetails.name}
                 </span>
-                <span className="font-mono text-base text-amber-600 dark:text-amber-400 font-bold">
+                <span className="font-sans tabular-nums text-base text-amber-600 dark:text-amber-400 font-bold">
                 {currentPackageDetails.formattedPrice}
                 </span>
                 </div>
-                <div className="text-neutral-700 dark:text-neutral-300 text-xs font-mono">
+                <div className="text-neutral-700 dark:text-neutral-300 text-xs font-sans tabular-nums">
                 Thời lượng: {currentPackageDetails.duration}
                 </div>
                 <div className="space-y-1 pt-1 text-neutral-700 dark:text-neutral-300 text-xs">
@@ -639,7 +639,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
                 {/* Tổng tiền ước tính + cọc 30% live — hien cho ca goi photobook
                 (man hinh xac nhan sau do cung hien coc, khong duoc giau o form). */}
-                <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm space-y-2 font-mono">
+                <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm space-y-2 font-sans tabular-nums">
                 <div className="flex justify-between items-center">
                 <span className="text-neutral-700 dark:text-neutral-300">TỔNG TIỀN ƯỚC TÍNH</span>
                 <span className="text-base text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</span>
@@ -665,7 +665,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
               <div className="space-y-5">
                 <div>
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 {isPhotobook ? 'Ngày muốn nhận ảnh *' : 'Ngày dự kiến chụp *'}
                 </label>
                 <input
@@ -689,7 +689,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 }`}
                 />
                 {errors.preferredDate && (
-                <p className="text-[11px] text-rose-500 mt-1">
+                <p className="text-xs text-rose-500 mt-1">
                 {errors.preferredDate}
                 </p>
                 )}
@@ -699,7 +699,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 {/* Khung giờ — bắt buộc với mọi gói trừ photobook-print */}
                 {!isPhotobook && (
                 <div className="space-y-2">
-                <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                <label className="block text-xs font-sans tabular-nums uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
                 Khung giờ chụp *
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5" role="radiogroup" aria-label="Khung giờ chụp">
@@ -735,7 +735,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 ))}
                 </div>
                 {errors.timeSlot && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.timeSlot}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.timeSlot}</p>
                 )}
                 </div>
                 )}
@@ -744,7 +744,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 {!isPhotobook && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Địa điểm chụp mong muốn
                 </label>
                 <select
@@ -805,12 +805,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 />
                 )}
                 {errors.location && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.location}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.location}</p>
                 )}
                 </div>
 
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Số lượng người chụp dự kiến
                 </label>
                 <div className="flex items-center gap-3">
@@ -836,13 +836,13 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 +
                 </button>
                 </div>
-                <p className="text-[11px] text-neutral-500 mt-1">
+                <p className="text-xs text-neutral-500 mt-1">
                 {formData.packageType === 'kiyieu-lop'
                 ? `Nhóm 5–15 bạn giá gốc ${formatPriceK(effectivePrices['kiyieu-lop'])}; vượt 15 người tính thêm ${formatPriceK(effectivePrices.extraPerPerson)}/người vượt.`
                 : 'Tối đa 2 bạn cho gói này.'}
                 </p>
                 {errors.groupSize && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.groupSize}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.groupSize}</p>
                 )}
                 </div>
                 </div>
@@ -855,7 +855,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 {/* Client info inputs */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Họ tên hoặc Tên Lớp/Nhóm *
                 </label>
                 <input
@@ -879,12 +879,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 }`}
                 />
                 {errors.clientName && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.clientName}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.clientName}</p>
                 )}
                 </div>
 
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Email nhận ảnh & hợp đồng *
                 </label>
                 <input
@@ -908,14 +908,14 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 }`}
                 />
                 {errors.email && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.email}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.email}</p>
                 )}
                 </div>
                 </div>
 
                 <div>
                 <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Số điện thoại / Zalo liên hệ *
                 </label>
                 <input
@@ -939,17 +939,17 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 }`}
                 />
                 {errors.phone && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.phone}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.phone}</p>
                 )}
                 </div>
                 </div>
 
                 <div>
                 <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300">
+                <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300">
                 Concept & Ý tưởng mong muốn <span className="text-neutral-400 font-normal lowercase">(tùy chọn)</span>
                 </label>
-                <span className="text-[10px] text-neutral-400 font-mono">Có thể để trống hoặc nhắn tin vắn tắt</span>
+                <span className="text-xs text-neutral-400 font-sans tabular-nums">Có thể để trống hoặc nhắn tin vắn tắt</span>
                 </div>
                 <textarea
                 rows={3}
@@ -972,7 +972,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 }`}
                 />
                 {errors.message && (
-                <p className="text-[11px] text-rose-500 mt-1">{errors.message}</p>
+                <p className="text-xs text-rose-500 mt-1">{errors.message}</p>
                 )}
                 </div>
 
@@ -1033,7 +1033,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 <button
                   type="button"
                   onClick={goToNextStep}
-                  className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer"
+                  className="px-6 py-2.5 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors cursor-pointer"
                 >
                   Tiếp tục →
                 </button>
@@ -1041,7 +1041,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-6 py-2.5 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
@@ -1056,7 +1056,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             </div>
           </form>
           {/* Thanh gia co dinh cuoi man hinh — chi mobile (md:hidden) */}
-          <div className="md:hidden shrink-0 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] px-5 py-3 flex items-center justify-between gap-3 text-sm font-mono">
+          <div className="md:hidden shrink-0 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] px-5 py-3 flex items-center justify-between gap-3 text-sm font-sans tabular-nums">
             <div>
               <div className="text-neutral-700 dark:text-neutral-300">Tổng tiền ước tính</div>
               <div className="text-base text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</div>

@@ -100,6 +100,10 @@ export interface PhotoItem {
   description: string;
   story: string;
   image: string;
+  /** Anh thumbnail ~600px WebP (v6): Gallery/Proofing load ban nay truoc,
+      anh lon 1600px chi load khi bam xem lon. Anh cu chua co thumb thi
+      fallback dung `image`. */
+  thumbUrl?: string;
   aspectRatio: '16:9' | '4:3' | '3:4' | '1:1';
   orientation: 'landscape' | 'portrait' | 'square';
   featured?: boolean;
@@ -202,6 +206,10 @@ export function filterPhotos(
     if (category !== 'all') {
       if (category === 'aodai-pho-nang-tho') {
         if (photo.category !== 'aodai-pho' && photo.category !== 'nang-tho') return false;
+      } else if (category === 'aodai') {
+        // v7 — chip 'Ao Dai' gop 3 category ao dai (trang / dao pho / nang tho)
+        // de Gallery chi con 4 chip loc.
+        if (photo.category !== 'aodai-trang' && photo.category !== 'aodai-pho' && photo.category !== 'nang-tho') return false;
       } else if (photo.category !== category) {
         return false;
       }
@@ -933,4 +941,76 @@ export function getRolePermissions(role: UserRole): RolePermissions {
  */
 export function isAdminEmail(email: string | null | undefined): boolean {
   return (email ?? '').trim().toLowerCase() === ADMIN_EMAIL;
+}
+
+// --- Proofing theo tung don (v6) ---
+// Anh proofing luu o collection `proofing_photos` (1 doc / 1 anh), lua chon
+// cua khach o `proofing_selections` (1 doc / 1 ma don, id = leadId).
+// Xem services/firebase.ts + firestore.rules. Bao mat o muc studio 1 nguoi:
+// ma don KY-... + 4 so cuoi SDT la "mat khau"; khong mo doc booking_leads.
+
+/** Toi da 30 anh proofing / don, moi file <= 8MB (giong anh portfolio). */
+export const MAX_PROOFING_PHOTOS_PER_LEAD = 30;
+export const MAX_PROOFING_FILE_BYTES = 8 * 1024 * 1024;
+/** Query proofing gioi han 50 anh / don, sap xep theo `order`. */
+export const PROOFING_QUERY_LIMIT = 50;
+
+export interface ProofingPhoto {
+  id: string;
+  /** Ma don, chu hoa (vd: KY-1234567). */
+  leadId: string;
+  /** URL anh lon 1600px (xem lon / Lightbox). */
+  url: string;
+  /** URL thumbnail ~600px WebP (luoi proofing load ban nay). */
+  thumbUrl?: string;
+  order: number;
+  /** 4 so cuoi SDT khach dat lich, chi so — dung de xac minh khi mo. */
+  phoneSuffix: string;
+  createdAt: string;
+}
+
+export interface ProofingSelection {
+  leadId: string;
+  selectedIds: string[];
+  ratings: Record<string, number>;
+  notes: Record<string, string>;
+  updatedAt: string;
+}
+
+/**
+ * Chuan hoa ma don: cat khoang trang, doi chu hoa.
+ * ' ky-12345 ' -> 'KY-12345'.
+ */
+export function normalizeProofingCode(code: string): string {
+  return (code || '').trim().toUpperCase();
+}
+
+/**
+ * Ma don hop le: bat dau 'KY-' + it nhat 4 ky tu chu/so sau do
+ * (ma that do createBookingLead sinh: KY- + 5 so cuoi timestamp + 2 so ngau
+ * nhien = 7 ky tu). Dung lai ham nay o ca ClientProofingModal.
+ */
+export function isValidProofingCode(code: string): boolean {
+  const normalized = normalizeProofingCode(code);
+  return /^KY-[A-Z0-9]{4,}$/.test(normalized);
+}
+
+/**
+ * Lay 4 so cuoi SDT (chi giu so). '0961 230 500' -> '0500';
+ * '+84 961 230 500' -> '0500'. It hon 4 so thi tra '' (khong du de xac minh).
+ */
+export function extractPhoneSuffix(phone: string): string {
+  const digits = (phone || '').replace(/[^0-9]/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : '';
+}
+
+/**
+ * Kiem tra 4 so cuoi khach nhap co khop SDT don khong.
+ * So sanh sau khi chi giu so; ca 2 ben deu phai du 4 so.
+ * matchesPhoneSuffix('0961230500', '0500') -> true.
+ */
+export function matchesPhoneSuffix(phone: string, suffix: string): boolean {
+  const expected = extractPhoneSuffix(phone);
+  const given = (suffix || '').replace(/[^0-9]/g, '');
+  return expected.length === 4 && given === expected;
 }

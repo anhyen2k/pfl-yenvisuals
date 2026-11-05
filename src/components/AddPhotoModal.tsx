@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Image as ImageIcon, Camera, Plus, Check } from 'lucide-react';
 import { PhotoItem, PhotoCategory, CATEGORY_LABELS } from '../utils/portfolioLogic';
 import { PHOTO_SERIES } from '../data/portfolioData';
-import { uploadPhotoToStorage } from '../services/firebase';
+import { compressImageFile, uploadPhotoWithThumbnail } from '../services/firebase';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
@@ -41,25 +41,49 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [orientation, setOrientation] = useState<PhotoItem['orientation']>('landscape');
   const [aspectRatio, setAspectRatio] = useState<PhotoItem['aspectRatio']>('4:3');
   const [error, setError] = useState('');
-  // File goc nguoi dung chon — chi dung de preview (base64) va upload len Storage.
+  // File goc nguoi dung chon — nen ngay khi chon, chi upload blob da nen khi submit.
   // KHONG luu base64 vao Firestore nua.
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const previewUrlRef = useRef('');
+
+  // Thu hoi object URL preview khi dong modal / unmount, tranh ro bo nho.
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
+  const revokePreview = () => {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = '';
+    }
+  };
 
   if (!isOpen) return null;
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 8 * 1024 * 1024) {
         setError('Kích thước ảnh không vượt quá 8MB');
         return;
       }
-      // Giu File goc de upload len Storage khi submit; preview base64 chi de xem truoc.
+      // Preview nhe bang object URL thay cho FileReader base64 (nang hon ~33%).
+      // Cung URL nay dung de do kich thuoc that dat orientation / aspectRatio.
+      revokePreview();
+      const previewUrl = URL.createObjectURL(file);
+      previewUrlRef.current = previewUrl;
       setSelectedFile(file);
+      setCompressedBlob(null);
+      setUploadPct(0);
       setImageUrlInput('');
-      // Doc kich thuoc that cua anh de dat dung orientation / aspectRatio
-      // (truoc day moi anh them moi deu bi gan landscape 4:3, anh doc bi hien sai khung).
+      setImagePreview(previewUrl);
+      setError('');
       const probe = new Image();
       probe.onload = () => {
         const ratio = probe.naturalWidth / Math.max(1, probe.naturalHeight);
@@ -77,27 +101,35 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           setAspectRatio('16:9');
         }
       };
-      probe.src = URL.createObjectURL(file);
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setImagePreview(reader.result);
-          setError('');
-        }
-      };
-      reader.readAsDataURL(file);
+      probe.src = previewUrl;
+      // Nen ngay khi chon file (trong luc Yen dien tieu de/mo ta), de luc
+      // bam Luu chi con upload blob da nen san. Nen loi thi dung file goc.
+      setIsCompressing(true);
+      try {
+        const blob = await compressImageFile(file);
+        setCompressedBlob(blob);
+      } catch {
+        setCompressedBlob(file);
+      } finally {
+        setIsCompressing(false);
+      }
     }
   };
 
   const clearImage = () => {
+    revokePreview();
     setImagePreview('');
     setSelectedFile(null);
+    setCompressedBlob(null);
+    setIsCompressing(false);
+    setUploadPct(0);
     setImageUrlInput('');
   };
 
   // Reset toan bo form: modal giu state khi dong (khong unmount) nen khong
   // reset thi lan mo sau van hien du lieu anh cu.
   const resetForm = () => {
+    revokePreview();
     setTitle('');
     setVietnameseTitle('');
     setCategory('aodai-trang');
@@ -119,6 +151,9 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     setAspectRatio('4:3');
     setError('');
     setSelectedFile(null);
+    setCompressedBlob(null);
+    setIsCompressing(false);
+    setUploadPct(0);
     setIsUploading(false);
   };
 
@@ -130,7 +165,11 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const handleUrlApply = () => {
     if (imageUrlInput.trim()) {
       // Chi dan URL: dung thang URL do, khong upload.
+      revokePreview();
       setSelectedFile(null);
+      setCompressedBlob(null);
+      setIsCompressing(false);
+      setUploadPct(0);
       setImagePreview(imageUrlInput.trim());
       setError('');
     }
@@ -138,6 +177,10 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isCompressing) {
+      setError('Đang nén ảnh, vui lòng đợi vài giây rồi bấm lại.');
+      return;
+    }
     if (!vietnameseTitle.trim()) {
       setError('Vui lòng nhập tiêu đề tác phẩm');
       return;
@@ -149,13 +192,24 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
 
     const newPhotoId = `custom-photo-${Date.now()}`;
 
-    // Co file: upload len Firebase Storage lay downloadURL roi moi goi onAddPhoto.
+    // Co file: blob da nen san tu luc chon file, chi con upload len
+    // Firebase Storage lay downloadURL roi moi goi onAddPhoto.
+    // (v6) Upload kem thumbnail ~600px WebP de Gallery load thumb truoc.
     let imageUrl = imagePreview;
+    let thumbUrl: string | undefined;
     if (selectedFile) {
       setIsUploading(true);
+      setUploadPct(0);
       setError('');
       try {
-        imageUrl = await uploadPhotoToStorage(selectedFile, newPhotoId);
+        const uploaded = await uploadPhotoWithThumbnail(
+          selectedFile,
+          newPhotoId,
+          (pct) => setUploadPct(pct),
+          compressedBlob ?? undefined
+        );
+        imageUrl = uploaded.url;
+        thumbUrl = uploaded.thumbUrl;
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         setError(
@@ -188,6 +242,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       description: description.trim() || 'Tác phẩm mới được thêm vào bộ sưu tập cá nhân.',
       story: story.trim() || description.trim(),
       image: imageUrl,
+      thumbUrl,
       aspectRatio,
       orientation,
       seriesId: seriesId || undefined,
@@ -207,7 +262,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       aria-label="Thêm tác phẩm vào portfolio"
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in"
     >
-      <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white dark:bg-[#0c0c0e] border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="px-6 py-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -240,7 +295,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
 
           {/* Image source: File upload or URL */}
           <div className="space-y-2">
-            <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+            <label className="block text-xs font-sans tabular-nums uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
               Hình ảnh tác phẩm *
             </label>
 
@@ -266,7 +321,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                   <span className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
                     Bấm để chọn file ảnh từ máy tính
                   </span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
+                  <span className="text-xs text-neutral-500 mt-0.5">
                     Hỗ trợ JPEG, PNG, WebP (Tối đa 8MB)
                   </span>
                   <input
@@ -300,7 +355,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           {/* Titles */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+              <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Tiêu đề tiếng Việt *
               </label>
               <input
@@ -313,7 +368,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+              <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Tiêu đề tiếng Anh (tùy chọn)
               </label>
               <input
@@ -329,7 +384,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           {/* Category & Year */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+              <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Thể loại kỉ yếu / áo dài
               </label>
               <select
@@ -347,7 +402,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+              <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Bộ sưu tập (Series) — tùy chọn
               </label>
               <select
@@ -366,7 +421,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+              <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
                 Năm chụp & Địa điểm
               </label>
               <div className="grid grid-cols-3 gap-2">
@@ -390,12 +445,12 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
 
           {/* Camera Gear & EXIF */}
           <div className="p-3.5 rounded-lg bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 space-y-3">
-            <div className="text-[11px] font-mono uppercase text-neutral-500 font-semibold">
+            <div className="text-xs font-sans tabular-nums uppercase text-neutral-500 font-semibold">
               Thông số máy ảnh & EXIF
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
-                <span className="text-[10px] text-neutral-500 font-mono block">MÁY ẢNH</span>
+                <span className="text-xs text-neutral-500 font-sans tabular-nums block">MÁY ẢNH</span>
                 <input
                   type="text"
                   value={camera}
@@ -404,7 +459,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 />
               </div>
               <div>
-                <span className="text-[10px] text-neutral-500 font-mono block">ỐNG KÍNH</span>
+                <span className="text-xs text-neutral-500 font-sans tabular-nums block">ỐNG KÍNH</span>
                 <input
                   type="text"
                   value={lens}
@@ -413,7 +468,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 />
               </div>
               <div>
-                <span className="text-[10px] text-neutral-500 font-mono block">KHẨU ĐỘ</span>
+                <span className="text-xs text-neutral-500 font-sans tabular-nums block">KHẨU ĐỘ</span>
                 <input
                   type="text"
                   value={aperture}
@@ -422,7 +477,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 />
               </div>
               <div>
-                <span className="text-[10px] text-neutral-500 font-mono block">TỐC ĐỘ</span>
+                <span className="text-xs text-neutral-500 font-sans tabular-nums block">TỐC ĐỘ</span>
                 <input
                   type="text"
                   value={shutterSpeed}
@@ -435,7 +490,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
 
           {/* Description & Story */}
           <div>
-            <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+            <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
               Câu chuyện & Cảm xúc phía sau bức ảnh
             </label>
             <textarea
@@ -451,7 +506,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+            <label className="block text-xs font-sans tabular-nums uppercase text-neutral-700 dark:text-neutral-300 mb-1">
               Thẻ phân loại (ngăn cách bởi dấu phẩy)
             </label>
             <input
@@ -474,10 +529,14 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isUploading}
+              disabled={isUploading || isCompressing}
               className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-50"
             >
-              {isUploading ? 'Đang tải ảnh lên...' : 'Thêm Vào Portfolio'}
+              {isCompressing
+                ? 'Đang nén ảnh...'
+                : isUploading
+                  ? `Đang tải lên ${uploadPct}%...`
+                  : 'Thêm Vào Portfolio'}
             </button>
           </div>
         </form>

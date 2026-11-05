@@ -32,6 +32,21 @@ import {
   PhotoItem,
 } from './portfolioLogic.js';
 import * as portfolioLogicModule from './portfolioLogic.js';
+import {
+  DEFAULT_SITE_CONTENT,
+  mergeSiteContent,
+  validateSiteContent,
+  sanitizePlainText,
+  splitMarqueeItems,
+} from '../config/content.js';
+import {
+  normalizeProofingCode,
+  isValidProofingCode,
+  extractPhoneSuffix,
+  matchesPhoneSuffix,
+  MAX_PROOFING_PHOTOS_PER_LEAD,
+  PROOFING_QUERY_LIMIT,
+} from './portfolioLogic.js';
 
 const mockPhotos: PhotoItem[] = [
   {
@@ -537,4 +552,85 @@ test('isAdminEmail: email quan tri dung du co khoang trang / chu hoa, email khac
   assert.equal(isAdminEmail(''), false);
   assert.equal(isAdminEmail(null), false);
   assert.equal(isAdminEmail(undefined), false);
+});
+
+test('proofing: normalize + validate ma don KY-...', () => {
+  assert.equal(normalizeProofingCode(' ky-12345 '), 'KY-12345');
+  assert.equal(normalizeProofingCode('KY-1234567'), 'KY-1234567');
+  assert.equal(isValidProofingCode('KY-12345'), true);
+  assert.equal(isValidProofingCode('ky-1234567'), true);
+  assert.equal(isValidProofingCode('KY-123'), false);
+  assert.equal(isValidProofingCode('KY-'), false);
+  assert.equal(isValidProofingCode('12345'), false);
+  assert.equal(isValidProofingCode(''), false);
+  assert.equal(isValidProofingCode('KY-12 34'), false);
+});
+
+test('proofing: extractPhoneSuffix lay 4 so cuoi SDT', () => {
+  assert.equal(extractPhoneSuffix('0961230500'), '0500');
+  assert.equal(extractPhoneSuffix('0961 230 500'), '0500');
+  assert.equal(extractPhoneSuffix('+84 961 230 500'), '0500');
+  assert.equal(extractPhoneSuffix('0123'), '0123');
+  assert.equal(extractPhoneSuffix('123'), '');
+  assert.equal(extractPhoneSuffix(''), '');
+});
+
+test('proofing: matchesPhoneSuffix chi khop dung 4 so cuoi', () => {
+  assert.equal(matchesPhoneSuffix('0961230500', '0500'), true);
+  assert.equal(matchesPhoneSuffix('0961 230 500', '0500'), true);
+  assert.equal(matchesPhoneSuffix('0961230500', '0501'), false);
+  assert.equal(matchesPhoneSuffix('0961230500', '500'), false);
+  assert.equal(matchesPhoneSuffix('0961230500', ''), false);
+  assert.equal(matchesPhoneSuffix('', '0500'), false);
+});
+
+test('proofing: gioi han 30 anh/don va query limit 50', () => {
+  assert.equal(MAX_PROOFING_PHOTOS_PER_LEAD, 30);
+  assert.equal(PROOFING_QUERY_LIMIT, 50);
+});
+
+test('content: merge dung mac dinh khi thieu truong hoac rong', () => {
+  const merged = mergeSiteContent({});
+  assert.deepEqual(merged, DEFAULT_SITE_CONTENT);
+  const partial = mergeSiteContent({ heroTitle: 'Tieu de moi', aboutName: '' });
+  assert.equal(partial.heroTitle, 'Tieu de moi');
+  assert.equal(partial.aboutName, DEFAULT_SITE_CONTENT.aboutName);
+  assert.equal(partial.heroSubtitle, DEFAULT_SITE_CONTENT.heroSubtitle);
+  const withDesc = mergeSiteContent({ packageDescriptions: { 'aodai-solo': 'Mo ta moi' } });
+  assert.equal(withDesc.packageDescriptions['aodai-solo'], 'Mo ta moi');
+  assert.equal(withDesc.packageDescriptions['kiyieu-lop'], DEFAULT_SITE_CONTENT.packageDescriptions['kiyieu-lop']);
+  assert.equal(mergeSiteContent(null).heroTitle, DEFAULT_SITE_CONTENT.heroTitle);
+  assert.equal(mergeSiteContent('chuoi lac').footerTagline, DEFAULT_SITE_CONTENT.footerTagline);
+});
+
+test('content: sanitize loai bo the HTML, cat chuoi qua dai', () => {
+  assert.equal(sanitizePlainText('<b>Xin chao</b> moi nguoi', 200), 'Xin chao moi nguoi');
+  assert.equal(sanitizePlainText('<script>alert(1)</script>An toan', 200), 'alert(1)An toan');
+  assert.equal(sanitizePlainText('<img src=x onerror=alert(1)>', 200), '');
+  assert.equal(sanitizePlainText('a'.repeat(300), 200).length, 200);
+  assert.equal(sanitizePlainText(123 as unknown as string, 200), '');
+  const merged = mergeSiteContent({ heroTitle: '<script>x</script>Tieu de that' });
+  assert.equal(merged.heroTitle, 'xTieu de that');
+  assert.ok(!merged.heroTitle.includes('<'));
+});
+
+test('content: validate bao loi khi vuot gioi han, hop le thi rong', () => {
+  assert.deepEqual(validateSiteContent(DEFAULT_SITE_CONTENT), []);
+  assert.deepEqual(validateSiteContent({}), []);
+  const tooLong = validateSiteContent({ heroTitle: 'x'.repeat(201) });
+  assert.ok(tooLong.length > 0);
+  assert.ok(tooLong.some((e) => e.includes('Tiêu đề chính Hero')));
+  const badType = validateSiteContent({ heroTitle: 123 });
+  assert.ok(badType.length > 0);
+  const badDesc = validateSiteContent({ packageDescriptions: { 'aodai-solo': 'y'.repeat(201) } });
+  assert.ok(badDesc.length > 0);
+  assert.deepEqual(validateSiteContent({ heroTitle: 'OK', packageDescriptions: { 'kiyieu-lop': 'Mo ta ngan' } }), []);
+});
+
+test('content: splitMarqueeItems tach muc theo dau ·', () => {
+  const items = splitMarqueeItems(DEFAULT_SITE_CONTENT.marqueeText);
+  assert.ok(items.length >= 5);
+  assert.equal(items[0], 'KỈ YẾU HỌC SINH & SINH VIÊN');
+  assert.deepEqual(splitMarqueeItems('A · B ·  · C'), ['A', 'B', 'C']);
+  assert.deepEqual(splitMarqueeItems(''), []);
 });

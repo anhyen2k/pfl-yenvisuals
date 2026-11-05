@@ -77,7 +77,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        className="relative w-full max-w-md bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl p-6 sm:p-8 overflow-hidden text-neutral-900 dark:text-neutral-100"
+        className="relative w-full max-w-md bg-white dark:bg-[#111115] border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-xl p-6 sm:p-8 overflow-hidden text-neutral-900 dark:text-neutral-100"
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-login-title"
@@ -163,7 +163,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         </div>
 
         {/* Security footnote */}
-        <div className="mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800/80 text-center text-[11px] text-neutral-400">
+        <div className="mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800/80 text-center text-xs text-neutral-400">
           Khách hàng thông thường chỉ có quyền xem ảnh, chọn ảnh yêu thích và gửi đơn đăng ký chụp.
         </div>
       </div>
