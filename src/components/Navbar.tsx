@@ -89,14 +89,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 Về Tác Giả & Thiết Bị
               </a>
-              <button
-                type="button"
-                onClick={onOpenProofing}
-                className="hover:text-neutral-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
-                <span>Khu Vực Khách Hàng</span>
-              </button>
+              {/* Nut "Khu Vuc Khach Hang" (Proofing) chi con trong menu mobile;
+                  van mo duoc tu ContactSection, khong mat chuc nang. */}
               <a
                 href={pathForSectionId('contact')}
                 onClick={(e) => { e.preventDefault(); navigateToSection('contact'); }}

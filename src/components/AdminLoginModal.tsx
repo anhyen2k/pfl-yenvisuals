@@ -6,20 +6,19 @@
 import React, { useState } from 'react';
 import { Lock, X, AlertCircle } from 'lucide-react';
 import { loginWithGoogle, logoutUser } from '../services/firebase';
-import { SITE_CONFIG } from '../config/site';
+import { ADMIN_EMAIL } from '../config/site';
+import { isAdminEmail } from '../utils/portfolioLogic';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: () => void;
-  photographerEmail?: string;
 }
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   isOpen,
   onClose,
   onLoginSuccess,
-  photographerEmail = SITE_CONFIG.photographerEmail,
 }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -34,11 +33,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       // Chi dung email quan tri moi duoc vao Dashboard: truoc day bat ky
       // tai khoan Google nao dang nhap xong cung goi onLoginSuccess() va
       // thanh admin. Kiem tra ngay tai day, sai email thi dang xuat luon.
-      const signedEmail = (user?.email || '').toLowerCase();
-      if (!user || signedEmail !== photographerEmail.toLowerCase()) {
+      // So sanh voi ADMIN_EMAIL co dinh (isAdminEmail chuan hoa
+      // trim().toLowerCase()), khong dung email nhan don photographerEmail
+      // vi gia tri do sua duoc trong Dashboard Settings.
+      if (!user || !isAdminEmail(user.email)) {
         await logoutUser().catch(() => {});
         setErrorMsg(
-          `Tài khoản Google ${user?.email || '(không rõ email)'} không phải tài khoản quản trị. Chỉ ${photographerEmail} mới vào được trang quản trị.`
+          `Tài khoản đã đăng nhập là "${user?.email || '(không rõ email)'}", tài khoản quản trị là "${ADMIN_EMAIL}". Chỉ tài khoản quản trị mới vào được trang quản trị. Nếu 2 email nhìn giống nhau mà vẫn báo lỗi, có thể do khoảng trắng trong cài đặt email nhận đơn cũ — hãy xoá giá trị đó trong Dashboard > Settings (mục Email nhận đơn) rồi đăng nhập lại.`
         );
         return;
       }
@@ -120,7 +121,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           )}
 
           <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center">
-            Chỉ tài khoản Google <strong className="text-neutral-800 dark:text-neutral-200">{SITE_CONFIG.photographerEmail}</strong> mới
+            Chỉ tài khoản Google <strong className="text-neutral-800 dark:text-neutral-200">{ADMIN_EMAIL}</strong> mới
             vào được trang quản trị.
           </p>
 
@@ -149,7 +150,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span>{isGoogleLoading ? 'Đang đăng nhập Google...' : `Đăng nhập với Google (${SITE_CONFIG.photographerEmail})`}</span>
+            <span>{isGoogleLoading ? 'Đang đăng nhập Google...' : `Đăng nhập với Google (${ADMIN_EMAIL})`}</span>
           </button>
 
           <button

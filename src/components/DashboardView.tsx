@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Users,
   Mail,
@@ -47,6 +47,9 @@ import {
   exportLeadsToExcel,
   getPackageDetails,
   sendBookingEmailReal,
+  DEFAULT_PACKAGE_PRICES,
+  validatePackagePrices,
+  type PackagePrices,
 } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
 
@@ -69,6 +72,12 @@ interface DashboardViewProps {
   onLogoutAdmin?: () => void;
   currentUser?: any;
   onGoogleLogin?: () => void;
+  /** Bang gia hien hanh (tu App / Firestore); khong truyen thi dung gia mac dinh. */
+  packagePrices?: PackagePrices;
+  /** Thoi gian luu bang gia lan cuoi (chuoi vi-VN); khong co thi khong hien. */
+  pricingUpdatedAt?: string;
+  /** Luu bang gia moi (App ghi Firestore + setState); khong truyen thi nut Luu bao loi. */
+  onSavePackagePrices?: (prices: PackagePrices) => Promise<void>;
 }
 
 /* ---- Helpers nội bộ cho Dashboard (chỉ dùng trong file này) ---- */
@@ -125,6 +134,40 @@ function leadPhoneDigits(phone: string): string {
   let digits = (phone || '').replace(/[^0-9]/g, '');
   if (digits.startsWith('84')) digits = '0' + digits.slice(2);
   return digits;
+}
+
+// ---- Form sua bang gia (tab Settings, muc 2) ----
+// Ten + mo ta hien thi cua tung goi. Luu y: PackagePrices chi co gia
+// (khong co truong desc) nen mo ta chi de hien thi, khong sua/luu.
+const PACKAGE_FORM_META: { id: BookingLead['packageType']; name: string; desc: string }[] = [
+  { id: 'aodai-solo', name: 'Áo Dài Nàng Thơ & Cá Nhân', desc: '1.5 - 2h chụp, hướng dẫn tạo dáng, 15 ảnh chỉnh da' },
+  { id: 'kiyieu-lop', name: 'Kỉ Yếu Nhóm Bạn Thân (5-15 bạn)', desc: 'Chụp kĩ từng bạn, trả 100% file gốc, 30 ảnh chỉnh màu' },
+  { id: 'cophuc-heritage', name: 'Áo Dài Cổ Phục & Mùa Thu', desc: 'Chụp di tích Hoàng Thành, Văn Miếu, tặng mượn nón lá' },
+  { id: 'photobook-print', name: 'Gói Rửa Ảnh & Set Để Bàn', desc: 'In 20 ảnh lụa mini + 1 khung ảnh để bàn 15x21cm' },
+];
+
+// "650000" -> "650.000" (hien trong o nhap gia); nhap so tho, dinh dang khi go.
+function formatPriceText(vnd: number): string {
+  return new Intl.NumberFormat('vi-VN').format(vnd);
+}
+
+function parsePriceText(text: string): number {
+  const digits = (text || '').replace(/[^0-9]/g, '');
+  return digits ? Number(digits) : 0;
+}
+
+// Gia rut gon kieu "650k" / "1.200k" (option chon goi, ghi chu phu phi).
+function formatPriceK(vnd: number): string {
+  return `${formatPriceText(Math.round(vnd / 1000))}k`;
+}
+
+function formatPriceDrafts(prices: PackagePrices): Record<BookingLead['packageType'], string> {
+  return {
+    'aodai-solo': formatPriceText(prices['aodai-solo']),
+    'kiyieu-lop': formatPriceText(prices['kiyieu-lop']),
+    'cophuc-heritage': formatPriceText(prices['cophuc-heritage']),
+    'photobook-print': formatPriceText(prices['photobook-print']),
+  };
 }
 
 // Quá hạn gọi lại: có hẹn gọi lại trước hôm nay và vẫn đang chờ tư vấn.
@@ -230,7 +273,93 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onLogoutAdmin,
   currentUser,
   onGoogleLogin,
+  packagePrices,
+  pricingUpdatedAt,
+  onSavePackagePrices,
 }) => {
+  const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
+
+  // --- Form sua bang gia (tab Settings, muc 2) ---
+  const [priceDrafts, setPriceDrafts] = useState<Record<BookingLead['packageType'], string>>(() =>
+    formatPriceDrafts(effectivePrices)
+  );
+  const [extraDraft, setExtraDraft] = useState<string>(() => formatPriceText(effectivePrices.extraPerPerson));
+  const [priceErrors, setPriceErrors] = useState<string[]>([]);
+  const [priceSaveMsg, setPriceSaveMsg] = useState<string | null>(null);
+  const [isSavingPrices, setIsSavingPrices] = useState(false);
+
+  // Gia tu App / Firestore ve sau (load async, subscribe live) thi nap lai form.
+  useEffect(() => {
+    if (!packagePrices) return;
+    setPriceDrafts(formatPriceDrafts(packagePrices));
+    setExtraDraft(formatPriceText(packagePrices.extraPerPerson));
+    setPriceErrors([]);
+  }, [packagePrices]);
+
+  const handlePriceInputChange = (key: BookingLead['packageType'], raw: string) => {
+    const digits = raw.replace(/[^0-9]/g, '');
+    setPriceDrafts((prev) => ({ ...prev, [key]: digits ? formatPriceText(Number(digits)) : '' }));
+  };
+
+  const handleExtraInputChange = (raw: string) => {
+    const digits = raw.replace(/[^0-9]/g, '');
+    setExtraDraft(digits ? formatPriceText(Number(digits)) : '');
+  };
+
+  const handleSavePackagePrices = async () => {
+    const candidate: PackagePrices = {
+      'aodai-solo': parsePriceText(priceDrafts['aodai-solo']),
+      'kiyieu-lop': parsePriceText(priceDrafts['kiyieu-lop']),
+      'cophuc-heritage': parsePriceText(priceDrafts['cophuc-heritage']),
+      'photobook-print': parsePriceText(priceDrafts['photobook-print']),
+      extraPerPerson: parsePriceText(extraDraft),
+    };
+    const errors = validatePackagePrices(candidate);
+    if (errors.length > 0) {
+      setPriceErrors(errors);
+      setPriceSaveMsg(null);
+      return;
+    }
+    if (!onSavePackagePrices) {
+      setPriceErrors(['Chưa cấu hình lưu giá (thiếu onSavePackagePrices) — giá chưa được lưu.']);
+      setPriceSaveMsg(null);
+      return;
+    }
+    setPriceErrors([]);
+    setPriceSaveMsg(null);
+    setIsSavingPrices(true);
+    try {
+      await onSavePackagePrices(candidate);
+      setPriceSaveMsg('Đã lưu bảng giá mới! Giá mới áp dụng ngay cho đơn đặt mới.');
+      triggerCopyToast('Đã lưu bảng giá mới!');
+    } catch (e: any) {
+      setPriceErrors([e?.message || 'Lưu giá thất bại, vui lòng thử lại.']);
+    } finally {
+      setIsSavingPrices(false);
+    }
+  };
+
+  const handleResetPackagePrices = async () => {
+    if (!window.confirm('Khôi phục toàn bộ bảng giá về giá mặc định (650k / 1.200k / 850k / 450k, phí vượt người 80k)? Giá mặc định sẽ được lưu và áp dụng ngay cho đơn đặt mới.')) return;
+    setPriceDrafts(formatPriceDrafts(DEFAULT_PACKAGE_PRICES));
+    setExtraDraft(formatPriceText(DEFAULT_PACKAGE_PRICES.extraPerPerson));
+    setPriceErrors([]);
+    if (!onSavePackagePrices) {
+      setPriceSaveMsg('Đã đặt lại giá mặc định trong form — bấm "Lưu giá" để áp dụng.');
+      return;
+    }
+    setIsSavingPrices(true);
+    try {
+      await onSavePackagePrices({ ...DEFAULT_PACKAGE_PRICES });
+      setPriceSaveMsg('Đã khôi phục giá mặc định!');
+      triggerCopyToast('Đã khôi phục giá mặc định!');
+    } catch (e: any) {
+      setPriceErrors([e?.message || 'Khôi phục giá mặc định thất bại, vui lòng thử lại.']);
+    } finally {
+      setIsSavingPrices(false);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'leads' | 'emails' | 'photos' | 'settings'>('leads');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -256,7 +385,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     groupSize: '1 - 2 bạn',
     message: '',
     notes: 'Liên hệ qua Zalo / Facebook',
-    estimatedPrice: 650000,
+    estimatedPrice: DEFAULT_PACKAGE_PRICES['aodai-solo'],
     paidAmount: 0,
     status: 'new' as BookingStatus,
     source: 'manual_entry' as const,
@@ -391,7 +520,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     setSendingEmailId(log.id);
     try {
-      const res = await sendBookingEmailReal(matchingLead, photographerEmail);
+      const res = await sendBookingEmailReal(matchingLead, photographerEmail, effectivePrices);
       triggerCopyToast(res.message);
     } catch (err: any) {
       triggerCopyToast('Lỗi gửi mail: ' + (err?.message || 'Thử lại sau'));
@@ -466,7 +595,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       alert('Vui lòng nhập tên khách hàng và số điện thoại!');
       return;
     }
-    const pkg = getPackageDetails(newLeadForm.packageType);
+    const pkg = getPackageDetails(newLeadForm.packageType, effectivePrices);
     const paidAmount = Math.max(0, newLeadForm.paidAmount || 0);
     onAddManualLead({
       ...newLeadForm,
@@ -486,7 +615,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       groupSize: '1 - 2 bạn',
       message: '',
       notes: '',
-      estimatedPrice: 650000,
+      estimatedPrice: getPackageDetails('aodai-solo', effectivePrices).basePriceVND,
       paidAmount: 0,
       status: 'new',
       source: 'manual_entry',
@@ -902,8 +1031,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
 
-            {/* Leads Table Card */}
-            <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] shadow-xs overflow-hidden">
+            {/* Leads Table Card — chi desktop (hidden md:block); mobile dung the don o duoi */}
+            <div className="hidden md:block rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
@@ -1262,6 +1391,88 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </table>
               </div>
             </div>
+
+            {/* The don dang the — chi mobile (block md:hidden). Dung lai
+                filteredLeads (da loc/tim/sap xep) va cac ham/handler da co;
+                bang desktop o tren giu nguyen. */}
+            <div className="block md:hidden space-y-3">
+              {filteredLeads.length === 0 ? (
+                <div className="py-10 text-center border border-dashed border-neutral-300 dark:border-neutral-700 rounded-xl text-xs text-neutral-400">
+                  <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p>Không tìm thấy yêu cầu tư vấn nào phù hợp.</p>
+                </div>
+              ) : (
+                filteredLeads.map((lead) => {
+                  const statusBadge = formatStatusLabel(lead.status);
+                  const cleanPhone = leadPhoneDigits(lead.phone);
+                  return (
+                    <article
+                      key={lead.id}
+                      className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] p-4 space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-neutral-900 dark:text-white truncate">
+                            {lead.clientName}
+                          </div>
+                          <div className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400 mt-0.5">
+                            Mã: #{lead.id} · {lead.createdAt}
+                          </div>
+                        </div>
+                        <span
+                          className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.color} ${statusBadge.border}`}
+                        >
+                          {statusBadge.label}
+                        </span>
+                      </div>
+                      <div className="text-xs text-neutral-600 dark:text-neutral-300 space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                          <span>
+                            {lead.preferredDate || 'Chưa chọn ngày'}
+                            {lead.timeSlot ? ` · ${timeSlotLabel(lead.timeSlot)}` : ''}
+                          </span>
+                        </div>
+                        <div>{getPackageDetails(lead.packageType).name}</div>
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-neutral-500 dark:text-neutral-400">Tiền còn lại</span>
+                          <span className="font-mono font-bold text-base text-amber-600 dark:text-amber-400">
+                            {formatVND(leadBalance(lead))}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <a
+                          href={`tel:${cleanPhone}`}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>Gọi</span>
+                        </a>
+                        <a
+                          href={`https://zalo.me/${cleanPhone}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Zalo</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyBookingCode(lead)}
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 transition-colors cursor-pointer"
+                          title={`Sao chép mã đơn ${lead.id}`}
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Sao chép mã</span>
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
 
@@ -1529,6 +1740,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       onChange={(e) => onUpdatePhotographerEmail(e.target.value)}
                       className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 font-semibold"
                     />
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
+                      Đổi email này chỉ đổi nơi nhận đơn, không đổi tài khoản quản trị (luôn là anhyenk26@gmail.com).
+                    </p>
                   </div>
                   <div>
                     <label className="block text-neutral-600 dark:text-neutral-400 mb-1">
@@ -1555,27 +1769,89 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
 
-              {/* Service packages summary */}
+              {/* Service packages summary — sua duoc gia (luu qua onSavePackagePrices) */}
               <div className="space-y-4 pt-6 border-t border-neutral-200 dark:border-neutral-800">
                 <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-semibold">
                   2. CÁC GÓI CHỤP ĐANG CÔNG KHAI TRÊN WEBSITE
                 </div>
+                <p className="text-xs text-neutral-500">
+                  Nhập giá mới (VNĐ, chỉ nhập số — ví dụ 650000 sẽ hiện 650.000), bấm "Lưu giá" để áp dụng cho toàn website.
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[
-                    { id: 'aodai-solo', name: 'Áo Dài Nàng Thơ & Cá Nhân', price: '650.000 đ', desc: '1.5 - 2h chụp, hướng dẫn tạo dáng, 15 ảnh chỉnh da' },
-                    { id: 'kiyieu-lop', name: 'Kỉ Yếu Nhóm Bạn Thân (5-15 bạn)', price: '1.200.000 đ', desc: 'Chụp kĩ từng bạn, trả 100% file gốc, 30 ảnh chỉnh màu' },
-                    { id: 'cophuc-heritage', name: 'Áo Dài Cổ Phục & Mùa Thu', price: '850.000 đ', desc: 'Chụp di tích Hoàng Thành, Văn Miếu, tặng mượn nón lá' },
-                    { id: 'photobook-print', name: 'Gói Rửa Ảnh & Set Để Bàn', price: '450.000 đ', desc: 'In 20 ảnh lụa mini + 1 khung ảnh để bàn 15x21cm' },
-                  ].map((p, i) => (
-                    <div key={i} className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-xs space-y-1">
-                      <div className="flex justify-between items-center font-semibold text-neutral-900 dark:text-white">
-                        <span>{p.name}</span>
-                        <span className="font-mono text-amber-600 dark:text-amber-400">{p.price}</span>
-                      </div>
+                  {PACKAGE_FORM_META.map((p) => (
+                    <div key={p.id} className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-xs space-y-2">
+                      <div className="font-semibold text-neutral-900 dark:text-white">{p.name}</div>
                       <p className="text-neutral-500">{p.desc}</p>
+                      <label className="block">
+                        <span className="text-neutral-600 dark:text-neutral-400">Giá gói (VNĐ)</span>
+                        <span className="mt-1 flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={priceDrafts[p.id]}
+                            onChange={(e) => handlePriceInputChange(p.id, e.target.value)}
+                            className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 dark:text-amber-400 font-semibold"
+                          />
+                          <span className="text-neutral-500 font-mono shrink-0">đ</span>
+                        </span>
+                      </label>
                     </div>
                   ))}
                 </div>
+                <div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-xs space-y-1">
+                  <label className="block">
+                    <span className="font-semibold text-neutral-900 dark:text-white">Phí vượt người — gói Kỉ Yếu Nhóm (trên 15 bạn, tính thêm /người vượt)</span>
+                    <span className="mt-1 flex items-center gap-1.5 max-w-xs">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={extraDraft}
+                        onChange={(e) => handleExtraInputChange(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md font-mono text-amber-600 dark:text-amber-400 font-semibold"
+                      />
+                      <span className="text-neutral-500 font-mono shrink-0">đ/người</span>
+                    </span>
+                  </label>
+                  <p className="text-neutral-500">
+                    Hiện tại: {formatVND(effectivePrices.extraPerPerson)}/người vượt (mặc định {formatVND(DEFAULT_PACKAGE_PRICES.extraPerPerson)}).
+                  </p>
+                </div>
+                {priceErrors.length > 0 && (
+                  <div role="alert" className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 space-y-1">
+                    {priceErrors.map((err, i) => (
+                      <p key={i}>• {err}</p>
+                    ))}
+                  </div>
+                )}
+                {priceSaveMsg && (
+                  <p role="status" className="text-xs text-emerald-700 dark:text-emerald-400">{priceSaveMsg}</p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSavePackagePrices}
+                    disabled={isSavingPrices}
+                    className="px-5 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-500 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    {isSavingPrices ? 'Đang lưu...' : 'Lưu giá'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPackagePrices}
+                    disabled={isSavingPrices}
+                    className="px-4 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-200 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-md cursor-pointer disabled:opacity-60"
+                  >
+                    Khôi phục giá mặc định
+                  </button>
+                  <span className="text-xs text-neutral-500">
+                    {pricingUpdatedAt
+                      ? `Lưu lần cuối: ${pricingUpdatedAt}`
+                      : 'Chưa có thông tin lần lưu giá cuối.'}
+                  </span>
+                </div>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  ⚠️ Giá mới áp dụng ngay cho đơn đặt mới, đơn cũ giữ giá lúc đặt.
+                </p>
               </div>
             </div>
           </div>
@@ -1808,7 +2084,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <input
                     type="tel"
                     required
-                    placeholder="0912..."
+                    placeholder="0961..."
                     value={newLeadForm.phone}
                     onChange={(e) => setNewLeadForm({ ...newLeadForm, phone: e.target.value })}
                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
@@ -1841,10 +2117,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     }
                     className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-700 rounded bg-neutral-50 dark:bg-neutral-900 dark:text-white"
                   >
-                    <option value="aodai-solo">Áo Dài Nàng Thơ (650k)</option>
-                    <option value="kiyieu-lop">Kỉ Yếu Nhóm Bạn (1.200k)</option>
-                    <option value="cophuc-heritage">Áo Dài Cổ Phục (850k)</option>
-                    <option value="photobook-print">Gói Rửa Ảnh (450k)</option>
+                    <option value="aodai-solo">Áo Dài Nàng Thơ ({formatPriceK(effectivePrices['aodai-solo'])})</option>
+                    <option value="kiyieu-lop">Kỉ Yếu Nhóm Bạn ({formatPriceK(effectivePrices['kiyieu-lop'])})</option>
+                    <option value="cophuc-heritage">Áo Dài Cổ Phục ({formatPriceK(effectivePrices['cophuc-heritage'])})</option>
+                    <option value="photobook-print">Gói Rửa Ảnh ({formatPriceK(effectivePrices['photobook-print'])})</option>
                   </select>
                 </div>
                 <div>

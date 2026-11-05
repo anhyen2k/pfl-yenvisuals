@@ -40,6 +40,25 @@ service cloud.firestore {
         && (!('estimatedPrice' in data) || data.estimatedPrice is number);
     }
 
+    function isValidPricing(data) {
+      return data.keys().hasAll(['prices'])
+        && data.prices is map
+        && data.prices.keys().hasAll(['aodai-solo', 'kiyieu-lop', 'cophuc-heritage', 'photobook-print', 'extraPerPerson'])
+        && data.prices['aodai-solo'] is number && data.prices['aodai-solo'] >= 50000 && data.prices['aodai-solo'] <= 10000000
+        && data.prices['kiyieu-lop'] is number && data.prices['kiyieu-lop'] >= 50000 && data.prices['kiyieu-lop'] <= 10000000
+        && data.prices['cophuc-heritage'] is number && data.prices['cophuc-heritage'] >= 50000 && data.prices['cophuc-heritage'] <= 10000000
+        && data.prices['photobook-print'] is number && data.prices['photobook-print'] >= 50000 && data.prices['photobook-print'] <= 10000000
+        && data.prices.extraPerPerson is number && data.prices.extraPerPerson >= 0 && data.prices.extraPerPerson <= 500000;
+    }
+
+    // Bang gia goi (settings/pricing): ai cung doc duoc, chi admin duoc ghi,
+    // du lieu khong hop le (ngoai gioi han gia) thi deny.
+    match /settings/{docId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidPricing(incoming());
+      allow delete: if isAdmin();
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;

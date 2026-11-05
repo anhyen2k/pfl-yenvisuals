@@ -6,7 +6,7 @@
 import React from 'react';
 import { ArrowRight, BookOpen, MapPin, Calendar, Layers, CalendarCheck, X } from 'lucide-react';
 import { PHOTO_SERIES, INITIAL_PHOTOS, PhotoSeries } from '../data/portfolioData';
-import { SERIES_PACKAGE, getPackageDetails, BookingInquiry, PhotoItem } from '../utils/portfolioLogic';
+import { SERIES_PACKAGE, getPackageDetails, BookingInquiry, PhotoItem, DEFAULT_PACKAGE_PRICES, type PackagePrices } from '../utils/portfolioLogic';
 
 interface SeriesSectionProps {
   onSelectSeries: (seriesId: string) => void;
@@ -15,6 +15,8 @@ interface SeriesSectionProps {
   onClearSeries?: () => void;
   /** Anh dang hien thi (tu Cloud + anh mau); khong truyen thi dung INITIAL_PHOTOS. */
   photos?: PhotoItem[];
+  /** Bang gia hien hanh (tu App / Firestore); khong truyen thi dung gia mac dinh. */
+  packagePrices?: PackagePrices;
 }
 
 export const SeriesSection: React.FC<SeriesSectionProps> = ({
@@ -23,7 +25,9 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
   selectedSeriesId,
   onClearSeries,
   photos,
+  packagePrices,
 }) => {
+  const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
   return (
     <section id="series" className="py-16 md:py-24 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-100/50 dark:bg-neutral-900/30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -61,7 +65,7 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
             const realCount = sourcePhotos.filter((photo) => photo.seriesId === series.id).length;
             const displayCount = realCount > 0 ? realCount : series.photoCount;
             const packageType = SERIES_PACKAGE[series.id];
-            const packageDetails = packageType ? getPackageDetails(packageType) : null;
+            const packageDetails = packageType ? getPackageDetails(packageType, effectivePrices) : null;
             const isSelected = selectedSeriesId === series.id;
             return (
             <div
@@ -135,9 +139,9 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
                   </div>
                   {packageDetails && packageType && (
                     <div className="flex items-center justify-between gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-                      <div className="text-xs">
-                        <div className="font-mono text-neutral-500 dark:text-neutral-400">Giá gói tương ứng</div>
-                        <div className="font-semibold text-neutral-900 dark:text-white mt-0.5">
+                      <div className="text-sm">
+                        <div className="font-mono text-neutral-700 dark:text-neutral-300">Giá gói tương ứng</div>
+                        <div className="text-base font-bold text-neutral-900 dark:text-white mt-0.5">
                           {packageDetails.formattedPrice}
                         </div>
                       </div>

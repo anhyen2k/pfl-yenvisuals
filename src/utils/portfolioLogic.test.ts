@@ -26,6 +26,9 @@ import {
   tomorrowISO,
   todayISO,
   generateEmailNotification,
+  DEFAULT_PACKAGE_PRICES,
+  validatePackagePrices,
+  type PackagePrices,
   PhotoItem,
 } from './portfolioLogic.js';
 import * as portfolioLogicModule from './portfolioLogic.js';
@@ -157,7 +160,7 @@ test('validateBookingInquiry validates client booking inputs', () => {
   const validWithShortMessage = {
     clientName: 'Kim chi',
     email: 'kimchi@gmail.com',
-    phone: '0912345678',
+    phone: '0961234500',
     packageType: 'aodai-solo' as const,
     preferredDate: '2027-02-01',
     timeSlot: 'chieu-14-16',
@@ -186,7 +189,7 @@ test('createBookingLead generates lead and formatted email notification to anhye
   const inquiry = {
     clientName: 'Hoàng Lan',
     email: 'hoanglan@gmail.com',
-    phone: '0912345678',
+    phone: '0961234500',
     packageType: 'aodai-solo' as const,
     preferredDate: '2026-11-18',
     location: 'Phan Đình Phùng',
@@ -200,7 +203,7 @@ test('createBookingLead generates lead and formatted email notification to anhye
   assert.equal(emailLog.toEmail, 'anhyenk26@gmail.com');
   assert.ok(emailLog.subject.includes('Hoàng Lan'));
   assert.ok(emailLog.fullBody.includes('Sony Alpha 7 Mark III'));
-  assert.ok(emailLog.fullBody.includes('0912345678'));
+  assert.ok(emailLog.fullBody.includes('0961234500'));
 });
 
 test('filterLeads filters by status and search terms', () => {
@@ -360,16 +363,16 @@ test('getRolePermissions strictly protects admin actions and allows guest browsi
 
 
 test('phone VN: normalize + validate 10 so dau 03/05/07/08/09', () => {
-  assert.equal(normalizePhone('0912 888 266'), '0912888266');
-  assert.equal(normalizePhone('+84 912 888 266'), '0912888266');
-  assert.equal(isValidVietnamesePhone('0912888266'), true);
+  assert.equal(normalizePhone('0961 230 500'), '0961230500');
+  assert.equal(normalizePhone('+84 961 230 500'), '0961230500');
+  assert.equal(isValidVietnamesePhone('0961230500'), true);
   assert.equal(isValidVietnamesePhone('01212320'), false);
   assert.equal(isValidVietnamesePhone('1234567890'), false);
   assert.equal(validateBookingInquiry({ clientName: 'A B', email: 'a@b.com', phone: '01212320', packageType: 'aodai-solo', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9' }).isValid, false);
 });
 
 test('validate chan ngay qua khu va bat khung gio tru photobook', () => {
-  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9' };
+  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0961234500', packageType: 'aodai-solo', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9' };
   assert.equal(validateBookingInquiry(base).isValid, true);
   assert.equal(validateBookingInquiry({ ...base, preferredDate: '2020-01-01' }).isValid, false);
   assert.equal(validateBookingInquiry({ ...base, timeSlot: undefined }).isValid, false);
@@ -380,14 +383,14 @@ test('ngay dung gio dia phuong, khong dat lich trong ngay hom nay', () => {
   const now = new Date();
   const expectedToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   assert.equal(todayISO(), expectedToday);
-  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: todayISO(), timeSlot: 'sang-7-9' };
+  const base: any = { clientName: 'A B', email: 'a@b.com', phone: '0961234500', packageType: 'aodai-solo', preferredDate: todayISO(), timeSlot: 'sang-7-9' };
   assert.equal(validateBookingInquiry(base).isValid, false);
   assert.ok(validateBookingInquiry(base).errors.preferredDate);
   assert.equal(validateBookingInquiry({ ...base, preferredDate: tomorrowISO() }).isValid, true);
 });
 
 test('goi kiyieu nhom toi thieu 5 ban', () => {
-  const base: any = { clientName: 'Lop 12A1', email: 'a@b.com', phone: '0912345678', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9', groupCount: 4 };
+  const base: any = { clientName: 'Lop 12A1', email: 'a@b.com', phone: '0961234500', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), timeSlot: 'sang-7-9', groupCount: 4 };
   assert.equal(validateBookingInquiry(base).isValid, false);
   assert.ok(validateBookingInquiry(base).errors.groupSize);
   assert.equal(validateBookingInquiry({ ...base, groupCount: 5 }).isValid, true);
@@ -401,7 +404,7 @@ test('gia kiyieu tren dau nguoi dung 80k-240k/ban', () => {
 });
 
 test('email log dung siteUrl that va fromEmail dung email nhan', () => {
-  const { emailLog } = createBookingLead({ clientName: 'Test', email: 't@x.com', phone: '0912345678', packageType: 'aodai-solo', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', message: '' } as any, 'anhyenk26@gmail.com');
+  const { emailLog } = createBookingLead({ clientName: 'Test', email: 't@x.com', phone: '0961234500', packageType: 'aodai-solo', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', message: '' } as any, 'anhyenk26@gmail.com');
   assert.equal(emailLog.fromEmail, 'anhyenk26@gmail.com');
   assert.ok(emailLog.fullBody.includes('https://anhyen2k.github.io/pfl-yenvisuals/'));
   assert.ok(!emailLog.fullBody.includes('ais-dev'));
@@ -413,7 +416,7 @@ test('gia nhom vuot 15 nguoi +80k/nguoi va coc 30%', () => {
   assert.equal(calculateEstimatedPrice('aodai-solo', 1), 650000);
   assert.equal(calculateDepositAmount(650000), 195000);
   assert.equal(calculateDepositAmount(1200000), 360000);
-  const { lead } = createBookingLead({ clientName: 'Nhom 20', email: 'n@x.com', phone: '0912345678', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', groupCount: 20, timeSlot: 'sang-9-11', message: '' } as any, 'anhyenk26@gmail.com');
+  const { lead } = createBookingLead({ clientName: 'Nhom 20', email: 'n@x.com', phone: '0961234500', packageType: 'kiyieu-lop', preferredDate: tomorrowISO(), location: 'Hoàng Thành Thăng Long', groupCount: 20, timeSlot: 'sang-9-11', message: '' } as any, 'anhyenk26@gmail.com');
   assert.equal(lead.estimatedPrice, 1600000);
   assert.equal(lead.depositAmount, 480000);
   assert.equal(lead.balance, 1600000);
@@ -448,4 +451,90 @@ test('dashboard stats them tien that da thu / con phai thu', () => {
   ] as any, 5);
   assert.equal(stats.totalPaid, 360000);
   assert.equal(stats.totalBalance, 1490000);
+});
+
+test('doi gia solo thanh 700k thi getPackageDetails / gia uoc tinh / coc 30% doi theo', () => {
+  const prices: PackagePrices = { ...DEFAULT_PACKAGE_PRICES, 'aodai-solo': 700000 };
+  const solo = getPackageDetails('aodai-solo', prices);
+  assert.equal(solo.basePriceVND, 700000);
+  assert.ok(solo.formattedPrice.includes('700.000'));
+
+  assert.equal(calculateEstimatedPrice('aodai-solo', 1, prices), 700000);
+  assert.equal(calculateDepositAmount(calculateEstimatedPrice('aodai-solo', 1, prices)), 210000);
+
+  // Don dat lich dung gia moi: coc 30% cua 700k = 210k
+  const { lead } = createBookingLead(
+    { clientName: 'Gia Moi', email: 'g@x.com', phone: '0961234500', packageType: 'aodai-solo', preferredDate: tomorrowISO(), location: 'Hồ Tây', timeSlot: 'sang-7-9', message: '' } as any,
+    'anhyenk26@gmail.com',
+    prices
+  );
+  assert.equal(lead.estimatedPrice, 700000);
+  assert.equal(lead.depositAmount, 210000);
+  assert.equal(lead.balance, 700000);
+});
+
+test('doi phu phi vuot nhom thi gia nhom doi theo', () => {
+  const prices: PackagePrices = { ...DEFAULT_PACKAGE_PRICES, extraPerPerson: 100000 };
+  // Nhom 20: 1.200.000 + 5 x 100.000 = 1.700.000 (thay vi 1.600.000 voi 80k mac dinh)
+  assert.equal(calculateEstimatedPrice('kiyieu-lop', 20, prices), 1700000);
+  assert.equal(calculateDepositAmount(1700000), 510000);
+  assert.equal(calculateEstimatedPrice('kiyieu-lop', 20), 1600000);
+});
+
+test('khong truyen prices thi dung gia mac dinh 650k / 1.200k / 850k / 450k', () => {
+  assert.deepEqual(DEFAULT_PACKAGE_PRICES, {
+    'aodai-solo': 650000,
+    'kiyieu-lop': 1200000,
+    'cophuc-heritage': 850000,
+    'photobook-print': 450000,
+    extraPerPerson: 80000,
+  });
+  assert.equal(getPackageDetails('aodai-solo').basePriceVND, 650000);
+  assert.equal(getPackageDetails('kiyieu-lop').basePriceVND, 1200000);
+  assert.equal(getPackageDetails('cophuc-heritage').basePriceVND, 850000);
+  assert.equal(getPackageDetails('photobook-print').basePriceVND, 450000);
+  assert.equal(calculateEstimatedPrice('aodai-solo'), 650000);
+  assert.equal(calculateEstimatedPrice('kiyieu-lop', 20), 1600000);
+  assert.equal(calculateDepositAmount(650000), 195000);
+});
+
+test('validatePackagePrices bao loi khi gia 0, gia 20.000.000, extraPerPerson -1', () => {
+  // Bang gia mac dinh hop le
+  assert.deepEqual(validatePackagePrices(DEFAULT_PACKAGE_PRICES), []);
+
+  // Gia goi = 0 (duoi muc toi thieu 50.000)
+  const zero = validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, 'aodai-solo': 0 });
+  assert.ok(zero.length > 0);
+  assert.ok(zero.some((e) => e.includes('Áo dài solo')));
+
+  // Gia goi = 20.000.000 (vuot muc toi da 10.000.000)
+  const tooHigh = validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, 'kiyieu-lop': 20000000 });
+  assert.ok(tooHigh.length > 0);
+
+  // Phu phi am
+  const negativeExtra = validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, extraPerPerson: -1 });
+  assert.ok(negativeExtra.length > 0);
+
+  // Gia khong phai so nguyen, phu phi vuot 500.000 cung loi
+  assert.ok(validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, 'cophuc-heritage': 850000.5 }).length > 0);
+  assert.ok(validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, extraPerPerson: 600000 }).length > 0);
+
+  // Bien gioi hop le: 50.000, 10.000.000, extra 0 va 500.000
+  assert.deepEqual(validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, 'aodai-solo': 50000, 'photobook-print': 10000000, extraPerPerson: 0 }), []);
+  assert.deepEqual(validatePackagePrices({ ...DEFAULT_PACKAGE_PRICES, extraPerPerson: 500000 }), []);
+});
+
+test('isAdminEmail: email quan tri dung du co khoang trang / chu hoa, email khac thi khong', () => {
+  const { isAdminEmail } = portfolioLogicModule as unknown as {
+    isAdminEmail: (email: string | null | undefined) => boolean;
+  };
+  assert.equal(isAdminEmail('anhyenk26@gmail.com'), true);
+  assert.equal(isAdminEmail('  anhyenk26@gmail.com  '), true);
+  assert.equal(isAdminEmail('AnhYenK26@Gmail.Com'), true);
+  assert.equal(isAdminEmail('  ANHYENK26@GMAIL.COM '), true);
+  assert.equal(isAdminEmail('khach@gmail.com'), false);
+  assert.equal(isAdminEmail('anhyenk26@gmail.com.vn'), false);
+  assert.equal(isAdminEmail(''), false);
+  assert.equal(isAdminEmail(null), false);
+  assert.equal(isAdminEmail(undefined), false);
 });

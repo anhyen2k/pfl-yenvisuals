@@ -35,6 +35,8 @@ import {
   calculateDepositAmount,
   normalizePhone,
   formatVND,
+  DEFAULT_PACKAGE_PRICES,
+  type PackagePrices,
 } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
 import { saveBookingLeadToCloud, saveEmailLogToCloud } from '../services/firebase';
@@ -50,10 +52,15 @@ interface BookingModalProps {
   photographerEmail?: string;
   existingLeads?: BookingLead[];
   initialPackage?: BookingInquiry['packageType'];
+  /** Bang gia hien hanh (tu App / Firestore); khong truyen thi dung gia mac dinh. */
+  packagePrices?: PackagePrices;
 }
 
 const SCHOOL_OPTION = 'Trường học (ghi rõ tên trường)';
 const OTHER_OPTION = 'Khác';
+
+// Nhan 3 buoc cua form dat lich.
+const STEP_LABELS = ['Chọn gói', 'Ngày & địa điểm', 'Thông tin liên hệ'] as const;
 
 function defaultGroupCount(packageType: BookingInquiry['packageType']): number {
   return packageType === 'kiyieu-lop' ? 5 : 1;
@@ -66,6 +73,11 @@ function maxGroupCount(packageType: BookingInquiry['packageType']): number {
 function minGroupCount(packageType: BookingInquiry['packageType']): number {
   // Goi kiyieu nhom ap dung tu 5 ban (ten goi "5 - 15 ban"); cac goi khac tu 1.
   return packageType === 'kiyieu-lop' ? 5 : 1;
+}
+
+// Gia rut gon kieu "650k" / "1.200k" de hien trong nut chon goi.
+function formatPriceK(vnd: number): string {
+  return `${new Intl.NumberFormat('vi-VN').format(Math.round(vnd / 1000))}k`;
 }
 
 function resolveLocation(
@@ -91,7 +103,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   photographerEmail = SITE_CONFIG.photographerEmail,
   existingLeads = [],
   initialPackage,
+  packagePrices,
 }) => {
+  const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
   const initialPkg = initialPackage ?? 'aodai-solo';
   const initialCount = defaultGroupCount(initialPkg);
 
@@ -126,6 +140,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
   const [pendingInquiry, setPendingInquiry] = useState<BookingInquiry | null>(null);
 
+  // Form 3 buoc: 1 chon goi, 2 ngay/gio/dia diem/so nguoi, 3 thong tin lien he.
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+
   // Khi initialPackage thay đổi / modal mở thì đặt packageType theo nó.
   useEffect(() => {
     if (isOpen && initialPackage) {
@@ -143,9 +160,9 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   if (!isOpen) return null;
 
   const isPhotobook = formData.packageType === 'photobook-print';
-  const currentPackageDetails = getPackageDetails(formData.packageType);
+  const currentPackageDetails = getPackageDetails(formData.packageType, effectivePrices);
   const groupCount = formData.groupCount ?? defaultGroupCount(formData.packageType);
-  const estimatedPriceLive = calculateEstimatedPrice(formData.packageType, groupCount);
+  const estimatedPriceLive = calculateEstimatedPrice(formData.packageType, groupCount, effectivePrices);
   const depositLive = calculateDepositAmount(estimatedPriceLive);
   const balanceLive = Math.max(0, estimatedPriceLive - 0);
 
@@ -195,6 +212,34 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     };
   };
 
+  // Validate chi cac truong cua 1 buoc (dung chung validateBookingInquiry
+  // roi loc lay loi cua buoc do); loi hien do o dung buoc.
+  const validateStep = (s: 1 | 2 | 3): boolean => {
+    const eff = buildEffectiveInquiry();
+    const v = validateBookingInquiry(eff);
+    const errs: Record<string, string> = {};
+    if (s === 1) {
+      if (v.errors.groupSize) errs.groupSize = v.errors.groupSize;
+    } else if (s === 2) {
+      for (const k of ['preferredDate', 'timeSlot', 'location', 'groupSize'] as const) {
+        if (v.errors[k]) errs[k] = v.errors[k];
+      }
+      // O nhap them khi chon "Truong hoc" / "Khac" la bat buoc de gop dia diem.
+      if (!isPhotobook && locationChoice === SCHOOL_OPTION && !schoolName.trim()) {
+        errs.location = 'Vui lòng nhập tên trường';
+      }
+      if (!isPhotobook && locationChoice === OTHER_OPTION && !customLocation.trim()) {
+        errs.location = 'Vui lòng nhập địa điểm chụp';
+      }
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const goToNextStep = () => {
+    if (validateStep(step)) setStep((step + 1) as 1 | 2 | 3);
+  };
+
   const proceedBooking = async (inquiry: BookingInquiry) => {
     setErrors({});
     setIsSubmitting(true);
@@ -208,7 +253,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       year: 'numeric',
     });
 
-    const estimatedPrice = calculateEstimatedPrice(inquiry.packageType, inquiry.groupCount);
+    const estimatedPrice = calculateEstimatedPrice(inquiry.packageType, inquiry.groupCount, effectivePrices);
     const depositAmount = calculateDepositAmount(estimatedPrice);
     const paidAmount = 0;
     const balance = Math.max(0, estimatedPrice - paidAmount);
@@ -240,7 +285,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     // sendBookingEmailReal; nếu không có thì dùng câu dự phòng trung thực.
     let emailStatusMsg = 'Đơn đã lưu, Anh Yên sẽ liên hệ qua Zalo/SĐT trong ngày.';
     try {
-      const emailResult = await sendBookingEmailReal(tempLead, photographerEmail);
+      const emailResult = await sendBookingEmailReal(tempLead, photographerEmail, effectivePrices);
       if (emailResult.message) {
         emailStatusMsg = emailResult.message;
       }
@@ -248,7 +293,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
       console.warn('Real email send attempt:', err);
     }
 
-    const emailLog = generateEmailNotification(tempLead, photographerEmail);
+    const emailLog = generateEmailNotification(tempLead, photographerEmail, effectivePrices);
     try {
       await saveEmailLogToCloud(emailLog);
     } catch (logErr) {
@@ -261,7 +306,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     setSubmittedBooking({
       id: bookingId,
       inquiry,
-      details: getPackageDetails(inquiry.packageType),
+      details: getPackageDetails(inquiry.packageType, effectivePrices),
       emailStatusMsg,
       estimatedPrice,
       depositAmount,
@@ -275,6 +320,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Chua o buoc cuoi: submit (vd bam Enter) chi validate buoc hien tai
+    // roi sang buoc sau, khong gui don.
+    if (step !== 3) {
+      if (validateStep(step)) setStep((step + 1) as 1 | 2 | 3);
+      return;
+    }
     const effectiveInquiry = buildEffectiveInquiry();
     const validation = validateBookingInquiry(effectiveInquiry);
     const nextErrors = { ...validation.errors };
@@ -319,6 +370,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
     const pkg = initialPackage ?? 'aodai-solo';
     const count = defaultGroupCount(pkg);
     setSubmittedBooking(null);
+    setStep(1);
     setShowDuplicateWarning(false);
     setPendingInquiry(null);
     setLocationChoice(HANOI_LOCATIONS[0]);
@@ -481,447 +533,540 @@ export const BookingModal: React.FC<BookingModalProps> = ({
             </div>
           </div>
         ) : (
+          <>
           /* Booking Form */
           <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
-            {/* Package Selector */}
-            <div className="space-y-2">
-              <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
-                Lựa chọn gói chụp kỉ yếu / áo dài *
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {[
-                  { id: 'aodai-solo', title: 'Áo Dài Nàng Thơ / Cá Nhân (650k)' },
-                  { id: 'kiyieu-lop', title: 'Kỉ Yếu Nhóm Bạn Thân (1.200k)' },
-                  { id: 'cophuc-heritage', title: 'Áo Dài Cổ Phục & Phố Cổ (850k)' },
-                  { id: 'photobook-print', title: 'Gói Rửa Ảnh & Set Để Bàn (450k)' },
-                ].map((pkg) => (
-                  <button
-                    key={pkg.id}
-                    type="button"
-                    onClick={() =>
-                      handlePackageChange(pkg.id as BookingInquiry['packageType'])
-                    }
-                    className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                      formData.packageType === pkg.id
-                        ? 'border-amber-600 dark:border-amber-400 bg-amber-50/40 dark:bg-amber-950/20 text-neutral-900 dark:text-white font-medium ring-1 ring-amber-500'
-                        : 'border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400'
-                    }`}
-                  >
-                    <div className="text-xs font-medium">{pkg.title}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Package details summary box */}
-            <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2">
-              <div className="flex items-center justify-between font-medium">
-                <span className="text-neutral-900 dark:text-white font-serif text-sm">
-                  {currentPackageDetails.name}
-                </span>
-                <span className="font-mono text-amber-600 dark:text-amber-400 font-semibold">
-                  {currentPackageDetails.formattedPrice}
-                </span>
-              </div>
-              <div className="text-neutral-500 text-[11px] font-mono">
-                Thời lượng: {currentPackageDetails.duration}
-              </div>
-              <div className="space-y-1 pt-1 text-neutral-600 dark:text-neutral-400 text-[11px]">
-                {currentPackageDetails.deliverables.map((d, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <span className="text-amber-500">✓</span>
-                    <span>{d}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Client info inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                  Họ tên hoặc Tên Lớp/Nhóm *
-                </label>
-                <input
-                  type="text"
-                  placeholder="Vd: Nguyễn Mai Linh / Lớp 12A1 Chu Văn An"
-                  value={formData.clientName}
-                  onChange={(e) => {
-                    setFormData({ ...formData, clientName: e.target.value });
-                    if (errors.clientName) {
-                      setErrors((prev) => {
-                        const copy = { ...prev };
-                        delete copy.clientName;
-                        return copy;
-                      });
-                    }
-                  }}
-                  className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
-                    errors.clientName
-                      ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
-                      : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
-                  }`}
-                />
-                {errors.clientName && (
-                  <p className="text-[11px] text-rose-500 mt-1">{errors.clientName}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                  Email nhận ảnh & hợp đồng *
-                </label>
-                <input
-                  type="email"
-                  placeholder="Vd: mailinh@gmail.com"
-                  value={formData.email}
-                  onChange={(e) => {
-                    setFormData({ ...formData, email: e.target.value });
-                    if (errors.email) {
-                      setErrors((prev) => {
-                        const copy = { ...prev };
-                        delete copy.email;
-                        return copy;
-                      });
-                    }
-                  }}
-                  className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
-                    errors.email
-                      ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
-                      : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
-                  }`}
-                />
-                {errors.email && (
-                  <p className="text-[11px] text-rose-500 mt-1">{errors.email}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                  Số điện thoại / Zalo liên hệ *
-                </label>
-                <input
-                  type="tel"
-                  placeholder={`Vd: ${SITE_CONFIG.phoneDisplay}`}
-                  value={formData.phone}
-                  onChange={(e) => {
-                    setFormData({ ...formData, phone: e.target.value });
-                    if (errors.phone) {
-                      setErrors((prev) => {
-                        const copy = { ...prev };
-                        delete copy.phone;
-                        return copy;
-                      });
-                    }
-                  }}
-                  className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
-                    errors.phone
-                      ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
-                      : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
-                  }`}
-                />
-                {errors.phone && (
-                  <p className="text-[11px] text-rose-500 mt-1">{errors.phone}</p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                  {isPhotobook ? 'Ngày muốn nhận ảnh *' : 'Ngày dự kiến chụp *'}
-                </label>
-                <input
-                  type="date"
-                  min={tomorrowISO()}
-                  value={formData.preferredDate}
-                  onChange={(e) => {
-                    setFormData({ ...formData, preferredDate: e.target.value });
-                    if (errors.preferredDate) {
-                      setErrors((prev) => {
-                        const copy = { ...prev };
-                        delete copy.preferredDate;
-                        return copy;
-                      });
-                    }
-                  }}
-                  className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
-                    errors.preferredDate
-                      ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
-                      : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
-                  }`}
-                />
-                {errors.preferredDate && (
-                  <p className="text-[11px] text-rose-500 mt-1">
-                    {errors.preferredDate}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Khung giờ — bắt buộc với mọi gói trừ photobook-print */}
-            {!isPhotobook && (
-              <div className="space-y-2">
-                <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
-                  Khung giờ chụp *
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5" role="radiogroup" aria-label="Khung giờ chụp">
-                  {TIME_SLOTS.map((slot) => (
-                    <label
-                      key={slot.id}
-                      className={`flex items-center gap-2 p-3 rounded-lg border text-xs cursor-pointer transition-all ${
-                        formData.timeSlot === slot.id
-                          ? 'border-amber-600 dark:border-amber-400 bg-amber-50/40 dark:bg-amber-950/20 text-neutral-900 dark:text-white font-medium ring-1 ring-amber-500'
-                          : 'border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400'
+            {/* Chi bao buoc 1-2-3: buoc da xong bam de quay lai */}
+            <ol className="flex items-center gap-1.5 sm:gap-2" aria-label="Các bước đặt lịch">
+              {STEP_LABELS.map((label, i) => {
+                const n = (i + 1) as 1 | 2 | 3;
+                const active = step === n;
+                const done = step > n;
+                return (
+                  <li key={label} className="flex flex-1 items-center gap-1.5 sm:gap-2 min-w-0">
+                    <button
+                      type="button"
+                      disabled={!done}
+                      onClick={() => done && setStep(n)}
+                      className={`flex items-center gap-1.5 min-w-0 rounded-md px-1 py-1 text-left ${
+                        done ? 'cursor-pointer' : 'cursor-default'
                       }`}
+                      aria-current={active ? 'step' : undefined}
                     >
-                      <input
-                        type="radio"
-                        name="timeSlot"
-                        value={slot.id}
-                        checked={formData.timeSlot === slot.id}
-                        onChange={() => {
-                          setFormData({ ...formData, timeSlot: slot.id });
-                          if (errors.timeSlot) {
-                            setErrors((prev) => {
-                              const copy = { ...prev };
-                              delete copy.timeSlot;
-                              return copy;
-                            });
-                          }
-                        }}
-                        className="accent-amber-600"
-                      />
-                      <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                      <span>{slot.label}</span>
-                    </label>
-                  ))}
-                </div>
-                {errors.timeSlot && (
-                  <p className="text-[11px] text-rose-500 mt-1">{errors.timeSlot}</p>
-                )}
-              </div>
-            )}
-
-            {/* Địa điểm + Số người — ẩn với gói photobook-print */}
-            {!isPhotobook && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                    Địa điểm chụp mong muốn
-                  </label>
-                  <select
-                    value={locationChoice}
-                    onChange={(e) => {
-                      setLocationChoice(e.target.value);
-                      setFormData((prev) => ({ ...prev, location: e.target.value }));
-                      if (errors.location) {
-                        setErrors((prev) => {
-                          const copy = { ...prev };
-                          delete copy.location;
-                          return copy;
-                        });
-                      }
-                    }}
-                    className="w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
-                  >
-                    {HANOI_LOCATIONS.map((loc) => (
-                      <option key={loc} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                  </select>
-                  {locationChoice === SCHOOL_OPTION && (
-                    <input
-                      type="text"
-                      placeholder="Nhập tên trường, vd: THPT Chu Văn An"
-                      value={schoolName}
-                      onChange={(e) => {
-                        setSchoolName(e.target.value);
-                        if (errors.location) {
-                          setErrors((prev) => {
-                            const copy = { ...prev };
-                            delete copy.location;
-                            return copy;
-                          });
-                        }
-                      }}
-                      className="mt-2 w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
-                    />
-                  )}
-                  {locationChoice === OTHER_OPTION && (
-                    <input
-                      type="text"
-                      placeholder="Nhập địa điểm khác tại Hà Nội"
-                      value={customLocation}
-                      onChange={(e) => {
-                        setCustomLocation(e.target.value);
-                        if (errors.location) {
-                          setErrors((prev) => {
-                            const copy = { ...prev };
-                            delete copy.location;
-                            return copy;
-                          });
-                        }
-                      }}
-                      className="mt-2 w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
-                    />
-                  )}
-                  {errors.location && (
-                    <p className="text-[11px] text-rose-500 mt-1">{errors.location}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
-                    Số lượng người chụp dự kiến
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      aria-label="Giảm số người"
-                      onClick={() => handleGroupCountChange(-1)}
-                      disabled={groupCount <= minGroupCount(formData.packageType)}
-                      className="w-8 h-8 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:border-amber-500 cursor-pointer"
-                    >
-                      −
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+                          active
+                            ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                            : done
+                              ? 'bg-amber-600 text-white'
+                              : 'bg-neutral-200 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                        }`}
+                      >
+                        {done ? '✓' : n}
+                      </span>
+                      <span
+                        className={`truncate text-[11px] sm:text-xs ${
+                          active
+                            ? 'font-semibold text-neutral-900 dark:text-white'
+                            : 'text-neutral-500 dark:text-neutral-400'
+                        }`}
+                      >
+                        {label}
+                      </span>
                     </button>
-                    <span className="text-sm font-medium text-neutral-900 dark:text-white min-w-16 text-center">
-                      {groupCount} bạn
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="Tăng số người"
-                      onClick={() => handleGroupCountChange(1)}
-                      disabled={groupCount >= maxGroupCount(formData.packageType)}
-                      className="w-8 h-8 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:border-amber-500 cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-neutral-500 mt-1">
-                    {formData.packageType === 'kiyieu-lop'
-                      ? 'Nhóm 5–15 bạn giá gốc 1.200k; vượt 15 người tính thêm 80k/người vượt.'
-                      : 'Tối đa 2 bạn cho gói này.'}
-                  </p>
-                  {errors.groupSize && (
-                    <p className="text-[11px] text-rose-500 mt-1">{errors.groupSize}</p>
-                  )}
-                </div>
-              </div>
-            )}
+                    {i < STEP_LABELS.length - 1 && (
+                      <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" aria-hidden="true" />
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
 
-            {/* Tổng tiền ước tính + cọc 30% live — hien cho ca goi photobook
+            {step === 1 && (
+              <div className="space-y-5">
+                {/* Package Selector */}
+                <div className="space-y-2">
+                <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                Lựa chọn gói chụp kỉ yếu / áo dài *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {[
+                { id: 'aodai-solo', title: `Áo Dài Nàng Thơ / Cá Nhân (${formatPriceK(effectivePrices['aodai-solo'])})` },
+                { id: 'kiyieu-lop', title: `Kỉ Yếu Nhóm Bạn Thân (${formatPriceK(effectivePrices['kiyieu-lop'])})` },
+                { id: 'cophuc-heritage', title: `Áo Dài Cổ Phục & Phố Cổ (${formatPriceK(effectivePrices['cophuc-heritage'])})` },
+                { id: 'photobook-print', title: `Gói Rửa Ảnh & Set Để Bàn (${formatPriceK(effectivePrices['photobook-print'])})` },
+                ].map((pkg) => (
+                <button
+                key={pkg.id}
+                type="button"
+                onClick={() =>
+                handlePackageChange(pkg.id as BookingInquiry['packageType'])
+                }
+                className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                formData.packageType === pkg.id
+                ? 'border-amber-600 dark:border-amber-400 bg-amber-50/40 dark:bg-amber-950/20 text-neutral-900 dark:text-white font-medium ring-1 ring-amber-500'
+                : 'border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400'
+                }`}
+                >
+                <div className="text-xs font-medium">{pkg.title}</div>
+                </button>
+                ))}
+                </div>
+                </div>
+
+                {/* Package details summary box */}
+                <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2">
+                <div className="flex items-center justify-between font-medium">
+                <span className="text-neutral-900 dark:text-white font-serif text-sm">
+                {currentPackageDetails.name}
+                </span>
+                <span className="font-mono text-base text-amber-600 dark:text-amber-400 font-bold">
+                {currentPackageDetails.formattedPrice}
+                </span>
+                </div>
+                <div className="text-neutral-700 dark:text-neutral-300 text-xs font-mono">
+                Thời lượng: {currentPackageDetails.duration}
+                </div>
+                <div className="space-y-1 pt-1 text-neutral-700 dark:text-neutral-300 text-xs">
+                {currentPackageDetails.deliverables.map((d, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                <span className="text-amber-500">✓</span>
+                <span>{d}</span>
+                </div>
+                ))}
+                </div>
+                </div>
+
+                {/* Tổng tiền ước tính + cọc 30% live — hien cho ca goi photobook
                 (man hinh xac nhan sau do cung hien coc, khong duoc giau o form). */}
-            <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs space-y-2 font-mono">
+                <div className="p-4 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm space-y-2 font-mono">
                 <div className="flex justify-between items-center">
-                  <span className="text-neutral-500">TỔNG TIỀN ƯỚC TÍNH</span>
-                  <span className="text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</span>
+                <span className="text-neutral-700 dark:text-neutral-300">TỔNG TIỀN ƯỚC TÍNH</span>
+                <span className="text-base text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-neutral-500">TIỀN CỌC 30%</span>
-                  <span className="text-neutral-900 dark:text-white font-medium">{formatVND(depositLive)}</span>
+                <span className="text-neutral-700 dark:text-neutral-300">TIỀN CỌC 30%</span>
+                <span className="text-neutral-900 dark:text-white font-semibold">{formatVND(depositLive)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-neutral-500">CÒN LẠI</span>
-                  <span className="text-neutral-900 dark:text-white font-medium">{formatVND(balanceLive)}</span>
+                <span className="text-neutral-700 dark:text-neutral-300">CÒN LẠI</span>
+                <span className="text-neutral-900 dark:text-white font-semibold">{formatVND(balanceLive)}</span>
                 </div>
                 {formData.packageType === 'kiyieu-lop' && groupCount > 15 && (
-                  <p className="text-[11px] text-neutral-500">
-                    Đã tính thêm {(groupCount - 15) * 80000}đ cho {groupCount - 15} người vượt 15 người (80k/người).
-                  </p>
+                <p className="text-xs text-neutral-700 dark:text-neutral-300">
+                Đã tính thêm {formatVND((groupCount - 15) * effectivePrices.extraPerPerson)} cho {groupCount - 15} người vượt 15 người ({formatPriceK(effectivePrices.extraPerPerson)}/người).
+                </p>
                 )}
-            </div>
+                </div>
+              </div>
+            )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
+            {step === 2 && (
+              <div className="space-y-5">
+                <div>
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                {isPhotobook ? 'Ngày muốn nhận ảnh *' : 'Ngày dự kiến chụp *'}
+                </label>
+                <input
+                type="date"
+                min={tomorrowISO()}
+                value={formData.preferredDate}
+                onChange={(e) => {
+                setFormData({ ...formData, preferredDate: e.target.value });
+                if (errors.preferredDate) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.preferredDate;
+                return copy;
+                });
+                }
+                }}
+                className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
+                errors.preferredDate
+                ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
+                : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
+                }`}
+                />
+                {errors.preferredDate && (
+                <p className="text-[11px] text-rose-500 mt-1">
+                {errors.preferredDate}
+                </p>
+                )}
+                </div>
+                </div>
+
+                {/* Khung giờ — bắt buộc với mọi gói trừ photobook-print */}
+                {!isPhotobook && (
+                <div className="space-y-2">
+                <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 dark:text-neutral-300">
+                Khung giờ chụp *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5" role="radiogroup" aria-label="Khung giờ chụp">
+                {TIME_SLOTS.map((slot) => (
+                <label
+                key={slot.id}
+                className={`flex items-center gap-2 p-3 rounded-lg border text-xs cursor-pointer transition-all ${
+                formData.timeSlot === slot.id
+                ? 'border-amber-600 dark:border-amber-400 bg-amber-50/40 dark:bg-amber-950/20 text-neutral-900 dark:text-white font-medium ring-1 ring-amber-500'
+                : 'border-neutral-200 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:border-neutral-400'
+                }`}
+                >
+                <input
+                type="radio"
+                name="timeSlot"
+                value={slot.id}
+                checked={formData.timeSlot === slot.id}
+                onChange={() => {
+                setFormData({ ...formData, timeSlot: slot.id });
+                if (errors.timeSlot) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.timeSlot;
+                return copy;
+                });
+                }
+                }}
+                className="accent-amber-600"
+                />
+                <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>{slot.label}</span>
+                </label>
+                ))}
+                </div>
+                {errors.timeSlot && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.timeSlot}</p>
+                )}
+                </div>
+                )}
+
+                {/* Địa điểm + Số người — ẩn với gói photobook-print */}
+                {!isPhotobook && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Địa điểm chụp mong muốn
+                </label>
+                <select
+                value={locationChoice}
+                onChange={(e) => {
+                setLocationChoice(e.target.value);
+                setFormData((prev) => ({ ...prev, location: e.target.value }));
+                if (errors.location) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.location;
+                return copy;
+                });
+                }
+                }}
+                className="w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                >
+                {HANOI_LOCATIONS.map((loc) => (
+                <option key={loc} value={loc}>
+                {loc}
+                </option>
+                ))}
+                </select>
+                {locationChoice === SCHOOL_OPTION && (
+                <input
+                type="text"
+                placeholder="Nhập tên trường, vd: THPT Chu Văn An"
+                value={schoolName}
+                onChange={(e) => {
+                setSchoolName(e.target.value);
+                if (errors.location) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.location;
+                return copy;
+                });
+                }
+                }}
+                className="mt-2 w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                />
+                )}
+                {locationChoice === OTHER_OPTION && (
+                <input
+                type="text"
+                placeholder="Nhập địa điểm khác tại Hà Nội"
+                value={customLocation}
+                onChange={(e) => {
+                setCustomLocation(e.target.value);
+                if (errors.location) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.location;
+                return copy;
+                });
+                }
+                }}
+                className="mt-2 w-full text-xs px-3 py-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                />
+                )}
+                {errors.location && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.location}</p>
+                )}
+                </div>
+
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Số lượng người chụp dự kiến
+                </label>
+                <div className="flex items-center gap-3">
+                <button
+                type="button"
+                aria-label="Giảm số người"
+                onClick={() => handleGroupCountChange(-1)}
+                disabled={groupCount <= minGroupCount(formData.packageType)}
+                className="w-8 h-8 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:border-amber-500 cursor-pointer"
+                >
+                −
+                </button>
+                <span className="text-sm font-medium text-neutral-900 dark:text-white min-w-16 text-center">
+                {groupCount} bạn
+                </span>
+                <button
+                type="button"
+                aria-label="Tăng số người"
+                onClick={() => handleGroupCountChange(1)}
+                disabled={groupCount >= maxGroupCount(formData.packageType)}
+                className="w-8 h-8 rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed hover:border-amber-500 cursor-pointer"
+                >
+                +
+                </button>
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-1">
+                {formData.packageType === 'kiyieu-lop'
+                ? `Nhóm 5–15 bạn giá gốc ${formatPriceK(effectivePrices['kiyieu-lop'])}; vượt 15 người tính thêm ${formatPriceK(effectivePrices.extraPerPerson)}/người vượt.`
+                : 'Tối đa 2 bạn cho gói này.'}
+                </p>
+                {errors.groupSize && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.groupSize}</p>
+                )}
+                </div>
+                </div>
+                )}
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-5">
+                {/* Client info inputs */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Họ tên hoặc Tên Lớp/Nhóm *
+                </label>
+                <input
+                type="text"
+                placeholder="Vd: Nguyễn Mai Linh / Lớp 12A1 Chu Văn An"
+                value={formData.clientName}
+                onChange={(e) => {
+                setFormData({ ...formData, clientName: e.target.value });
+                if (errors.clientName) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.clientName;
+                return copy;
+                });
+                }
+                }}
+                className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
+                errors.clientName
+                ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
+                : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
+                }`}
+                />
+                {errors.clientName && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.clientName}</p>
+                )}
+                </div>
+
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Email nhận ảnh & hợp đồng *
+                </label>
+                <input
+                type="email"
+                placeholder="Vd: mailinh@gmail.com"
+                value={formData.email}
+                onChange={(e) => {
+                setFormData({ ...formData, email: e.target.value });
+                if (errors.email) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.email;
+                return copy;
+                });
+                }
+                }}
+                className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
+                errors.email
+                ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
+                : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
+                }`}
+                />
+                {errors.email && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.email}</p>
+                )}
+                </div>
+                </div>
+
+                <div>
+                <div>
+                <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300 mb-1">
+                Số điện thoại / Zalo liên hệ *
+                </label>
+                <input
+                type="tel"
+                placeholder={`Vd: ${SITE_CONFIG.phoneDisplay}`}
+                value={formData.phone}
+                onChange={(e) => {
+                setFormData({ ...formData, phone: e.target.value });
+                if (errors.phone) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.phone;
+                return copy;
+                });
+                }
+                }}
+                className={`w-full text-xs px-3 py-2 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
+                errors.phone
+                ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
+                : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
+                }`}
+                />
+                {errors.phone && (
+                <p className="text-[11px] text-rose-500 mt-1">{errors.phone}</p>
+                )}
+                </div>
+                </div>
+
+                <div>
+                <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-mono uppercase text-neutral-700 dark:text-neutral-300">
-                  Concept & Ý tưởng mong muốn <span className="text-neutral-400 font-normal lowercase">(tùy chọn)</span>
+                Concept & Ý tưởng mong muốn <span className="text-neutral-400 font-normal lowercase">(tùy chọn)</span>
                 </label>
                 <span className="text-[10px] text-neutral-400 font-mono">Có thể để trống hoặc nhắn tin vắn tắt</span>
-              </div>
-              <textarea
+                </div>
+                <textarea
                 rows={3}
                 placeholder="Vd: Chụp áo dài trắng nữ sinh hoặc cổ phục, cần hướng dẫn tạo dáng... (Có thể nhắn 'hi' hoặc để trống nếu bạn cần studio gọi tư vấn từ đầu)"
                 value={formData.message}
                 onChange={(e) => {
-                  setFormData({ ...formData, message: e.target.value });
-                  if (errors.message) {
-                    setErrors((prev) => {
-                      const copy = { ...prev };
-                      delete copy.message;
-                      return copy;
-                    });
-                  }
+                setFormData({ ...formData, message: e.target.value });
+                if (errors.message) {
+                setErrors((prev) => {
+                const copy = { ...prev };
+                delete copy.message;
+                return copy;
+                });
+                }
                 }}
                 className={`w-full text-xs p-3 rounded border bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white focus:outline-hidden transition-colors ${
-                  errors.message
-                    ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
-                    : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
+                errors.message
+                ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30'
+                : 'border-neutral-300 dark:border-neutral-700 focus:border-amber-500'
                 }`}
-              />
-              {errors.message && (
+                />
+                {errors.message && (
                 <p className="text-[11px] text-rose-500 mt-1">{errors.message}</p>
-              )}
-            </div>
+                )}
+                </div>
 
-            {/* Cảnh báo trùng lịch — chỉ xác nhận, không chặn cứng */}
-            {showDuplicateWarning && (
-              <div
+                {/* Cảnh báo trùng lịch — chỉ xác nhận, không chặn cứng */}
+                {showDuplicateWarning && (
+                <div
                 role="alert"
                 className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 text-xs space-y-3"
-              >
+                >
                 <p className="text-amber-800 dark:text-amber-200 font-medium">
-                  Đã có đơn cùng SĐT, ngày và khung giờ này. Bạn vẫn muốn đặt thêm?
+                Đã có đơn cùng SĐT, ngày và khung giờ này. Bạn vẫn muốn đặt thêm?
                 </p>
                 <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => pendingInquiry && proceedBooking(pendingInquiry)}
-                    disabled={isSubmitting}
-                    className="px-4 py-2 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer disabled:opacity-60"
-                  >
-                    Vẫn đặt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDuplicateWarning(false);
-                      setPendingInquiry(null);
-                    }}
-                    className="px-4 py-2 text-xs font-medium rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                  >
-                    Quay lại sửa
-                  </button>
+                <button
+                type="button"
+                onClick={() => pendingInquiry && proceedBooking(pendingInquiry)}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer disabled:opacity-60"
+                >
+                Vẫn đặt
+                </button>
+                <button
+                type="button"
+                onClick={() => {
+                setShowDuplicateWarning(false);
+                setPendingInquiry(null);
+                }}
+                className="px-4 py-2 text-xs font-medium rounded-lg border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                >
+                Quay lại sửa
+                </button>
                 </div>
+                </div>
+                )}
               </div>
             )}
 
-            {/* Actions */}
-            <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleResetAndClose}
-                className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
-              >
-                Hủy
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Đang Gửi Tới Anh Yên...</span>
-                  </>
-                ) : (
-                  <span>Gửi Yêu Cầu Tư Vấn & Báo Giá</span>
-                )}
-              </button>
+            {/* Nut theo buoc: Quay lai / Tiep tuc / Gui don (buoc cuoi) */}
+            <div className="pt-4 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
+              {step === 1 ? (
+                <button
+                  type="button"
+                  onClick={handleResetAndClose}
+                  className="px-4 py-2 text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white cursor-pointer"
+                >
+                  Hủy
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setStep((step - 1) as 1 | 2 | 3)}
+                  className="px-4 py-2 text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white border border-neutral-300 dark:border-neutral-700 rounded-md transition-colors cursor-pointer"
+                >
+                  ← Quay lại
+                </button>
+              )}
+              {step < 3 ? (
+                <button
+                  type="button"
+                  onClick={goToNextStep}
+                  className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer"
+                >
+                  Tiếp tục →
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 rounded-md transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Đang Gửi Tới Anh Yên...</span>
+                    </>
+                  ) : (
+                    <span>Gửi Yêu Cầu Tư Vấn & Báo Giá</span>
+                  )}
+                </button>
+              )}
             </div>
           </form>
+          {/* Thanh gia co dinh cuoi man hinh — chi mobile (md:hidden) */}
+          <div className="md:hidden shrink-0 border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] px-5 py-3 flex items-center justify-between gap-3 text-sm font-mono">
+            <div>
+              <div className="text-neutral-700 dark:text-neutral-300">Tổng tiền ước tính</div>
+              <div className="text-base text-amber-600 dark:text-amber-400 font-bold">{formatVND(estimatedPriceLive)}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-neutral-700 dark:text-neutral-300">Cọc 30%</div>
+              <div className="font-semibold text-neutral-900 dark:text-white">{formatVND(depositLive)}</div>
+            </div>
+          </div>
+          </>
         )}
       </div>
     </div>

@@ -45,8 +45,12 @@ import {
   calculateEstimatedPrice,
   createBookingLead,
   generateEmailNotification,
+  getPackageDetails,
   sendBookingEmailReal,
+  isAdminEmail,
   UserRole,
+  DEFAULT_PACKAGE_PRICES,
+  type PackagePrices,
 } from './utils/portfolioLogic';
 import {
   saveBookingLeadToCloud,
@@ -61,6 +65,10 @@ import {
   deletePhotoFromStorage,
   seedMissingPortfolioPhotos,
   subscribeToPortfolioPhotos,
+  loadPackagePrices,
+  loadPackagePricesMeta,
+  savePackagePrices,
+  subscribeToPackagePrices,
   logoutUser,
   auth,
   onAuthStateChanged,
@@ -83,6 +91,92 @@ export default function App() {
   const [photographerEmail, setPhotographerEmail] = useState<string>(() => {
     return localStorage.getItem('yen_photographer_email') || SITE_CONFIG.photographerEmail;
   });
+
+  // Bang gia goi hien hanh: cache localStorage truoc, Firestore (settings/pricing)
+  // la nguon chinh, subscribe live de doi gia o Dashboard la cap nhat ngay.
+  const [packagePrices, setPackagePrices] = useState<PackagePrices>(() => {
+    try {
+      const saved = localStorage.getItem('yen_photo_package_prices');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          parsed &&
+          typeof parsed['aodai-solo'] === 'number' &&
+          typeof parsed['kiyieu-lop'] === 'number' &&
+          typeof parsed['cophuc-heritage'] === 'number' &&
+          typeof parsed['photobook-print'] === 'number' &&
+          typeof parsed.extraPerPerson === 'number'
+        ) {
+          return parsed as PackagePrices;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse package prices from storage', e);
+    }
+    return { ...DEFAULT_PACKAGE_PRICES };
+  });
+
+  // Thoi gian luu bang gia lan cuoi (loadPackagePrices / subscribe chi tra
+  // gia, khong tra updatedAt) nen ghi lai luc luu thanh cong, cache localStorage.
+  const [pricingUpdatedAt, setPricingUpdatedAt] = useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem('yen_photo_package_prices_updated_at') || undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+  // Tai bang gia tu Firestore khi mo trang + lang nghe live: admin doi gia
+  // o Dashboard thi gia hien tren web doi theo, khong can F5.
+  useEffect(() => {
+    let isMounted = true;
+    loadPackagePricesMeta()
+      .then((meta) => {
+        if (!isMounted || !meta) return;
+        setPackagePrices(meta.prices);
+        if (meta.updatedAt) {
+          const d = new Date(meta.updatedAt);
+          if (!isNaN(d.getTime())) {
+            const s = d.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+            setPricingUpdatedAt(s);
+            try { localStorage.setItem('yen_photo_package_prices_updated_at', s); } catch {}
+          }
+        }
+        try {
+          localStorage.setItem('yen_photo_package_prices', JSON.stringify(meta.prices));
+        } catch {}
+      })
+      .catch((e) => console.warn('Load package prices warning:', e));
+    const unsub = subscribeToPackagePrices((cloud) => {
+      if (!isMounted) return;
+      setPackagePrices(cloud);
+      try {
+        localStorage.setItem('yen_photo_package_prices', JSON.stringify(cloud));
+      } catch {}
+    });
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, []);
+
+  // Dashboard luu gia moi: ghi Firestore truoc, roi setState ngay (khong can F5).
+  const handleSavePackagePrices = async (prices: PackagePrices) => {
+    await savePackagePrices(prices);
+    setPackagePrices(prices);
+    const nowStr = new Date().toLocaleString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    setPricingUpdatedAt(nowStr);
+    try {
+      localStorage.setItem('yen_photo_package_prices', JSON.stringify(prices));
+      localStorage.setItem('yen_photo_package_prices_updated_at', nowStr);
+    } catch {}
+  };
 
   // Leads & Contact Inquiries state
   const [leads, setLeads] = useState<BookingLead[]>(() => {
@@ -267,7 +361,9 @@ export default function App() {
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
-      if (user && user.email?.toLowerCase() === photographerEmail.toLowerCase()) {
+      // Quyen admin chi xet theo ADMIN_EMAIL co dinh (isAdminEmail), khong
+      // dung email nhan don photographerEmail (sua duoc trong Settings).
+      if (user && isAdminEmail(user.email)) {
         setUserRole('admin');
         try {
           localStorage.setItem('yen_admin_auth', 'true');
@@ -284,7 +380,7 @@ export default function App() {
       }
     });
     return () => unsubAuth();
-  }, [photographerEmail]);
+  }, []);
 
   // Seed anh mau con thieu len Cloud ngay khi admin dang nhap: neu khong,
   // chi can cloud co 1 anh (Yen them anh that dau tien) la subscription se
@@ -336,7 +432,7 @@ export default function App() {
     }
 
     const isAuthorized =
-      currentUser.email?.toLowerCase() === photographerEmail.toLowerCase() ||
+      isAdminEmail(currentUser.email) ||
       userRole === 'admin';
 
     if (!isAuthorized) {
@@ -379,7 +475,7 @@ export default function App() {
       unsubLeads();
       unsubLogs();
     };
-  }, [currentUser, userRole, photographerEmail]);
+  }, [currentUser, userRole]);
 
   const handleToggleView = () => {
     if (userRole !== 'admin') {
@@ -568,8 +664,8 @@ export default function App() {
     existingLead?: BookingLead,
     existingEmailLog?: EmailNotificationLog
   ) => {
-    const lead = existingLead || createBookingLead(inquiry, photographerEmail).lead;
-    const emailLog = existingEmailLog || generateEmailNotification(lead, photographerEmail);
+    const lead = existingLead || createBookingLead(inquiry, photographerEmail, packagePrices).lead;
+    const emailLog = existingEmailLog || generateEmailNotification(lead, photographerEmail, packagePrices);
 
     setLeads((prev) => {
       const updated = [lead, ...prev.filter((item) => item.id !== lead.id)];
@@ -590,7 +686,7 @@ export default function App() {
       saveEmailLogToCloud(emailLog).catch((e) =>
         console.warn('Background Firestore log save warning', e)
       );
-      sendBookingEmailReal(lead, photographerEmail).catch((e) =>
+      sendBookingEmailReal(lead, photographerEmail, packagePrices).catch((e) =>
         console.warn('Background email send error', e)
       );
     }
@@ -663,7 +759,7 @@ export default function App() {
       month: '2-digit',
       year: 'numeric',
     });
-    const estimatedPrice = newLeadData.estimatedPrice || calculateEstimatedPrice(newLeadData.packageType, newLeadData.groupCount);
+    const estimatedPrice = newLeadData.estimatedPrice || calculateEstimatedPrice(newLeadData.packageType, newLeadData.groupCount, packagePrices);
     const depositAmount = newLeadData.depositAmount ?? calculateDepositAmount(estimatedPrice);
     const paidAmount = newLeadData.paidAmount ?? 0;
     const lead: BookingLead = {
@@ -678,7 +774,7 @@ export default function App() {
       emailSentTo: photographerEmail,
       emailSentAt: now,
     };
-    const emailLog = generateEmailNotification(lead, photographerEmail);
+    const emailLog = generateEmailNotification(lead, photographerEmail, packagePrices);
 
     setLeads((prev) => {
       const updated = [lead, ...prev];
@@ -718,15 +814,15 @@ export default function App() {
       status: 'new',
       notes: '[TEST] Email kiểm tra hệ thống.',
       source: 'web_form',
-      estimatedPrice: 650000,
-      depositAmount: 195000,
+      estimatedPrice: getPackageDetails('aodai-solo', packagePrices).basePriceVND,
+      depositAmount: calculateDepositAmount(getPackageDetails('aodai-solo', packagePrices).basePriceVND),
       paidAmount: 0,
-      balance: 650000,
+      balance: getPackageDetails('aodai-solo', packagePrices).basePriceVND,
       driveLink: '',
       emailSentTo: photographerEmail,
       emailSentAt: now,
     };
-    sendBookingEmailReal(testLead, photographerEmail).then((res) => {
+    sendBookingEmailReal(testLead, photographerEmail, packagePrices).then((res) => {
       console.log('[TEST] Test email dispatch result:', res);
       window.alert(res.message || 'Đã gửi mail thử (chưa xác nhận được đã gửi qua Airform — hãy kiểm tra hộp thư).');
     });
@@ -799,6 +895,9 @@ export default function App() {
             onExitDashboard={() => setCurrentView('portfolio')}
             onLogoutAdmin={handleLogoutAdmin}
             currentUser={currentUser}
+            packagePrices={packagePrices}
+            pricingUpdatedAt={pricingUpdatedAt}
+            onSavePackagePrices={handleSavePackagePrices}
             onGoogleLogin={async () => {
               try {
                 await loginWithGoogle();
@@ -871,7 +970,7 @@ export default function App() {
             />
 
             {/* Curated Monographs & Exhibitions Series */}
-            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} photos={photos} />
+            <SeriesSection onSelectSeries={handleSelectSeries} onOpenBooking={handleOpenBookingForPackage} selectedSeriesId={selectedSeriesId} onClearSeries={() => setSelectedSeriesId(null)} photos={photos} packagePrices={packagePrices} />
 
             {/* About the Artist & In My Camera Bag Gear */}
             <AboutSection />
@@ -932,6 +1031,7 @@ export default function App() {
         photographerEmail={photographerEmail}
         existingLeads={leads}
         initialPackage={bookingPackage}
+        packagePrices={packagePrices}
       />
 
       {/* Add Custom Photography Modal (Admin only) */}
@@ -954,7 +1054,6 @@ export default function App() {
         isOpen={isAdminLoginOpen}
         onClose={() => setIsAdminLoginOpen(false)}
         onLoginSuccess={handleAdminLoginSuccess}
-        photographerEmail={photographerEmail}
       />
     </div>
   );

@@ -8,6 +8,27 @@
   --font-mono: "JetBrains Mono", monospace;
 }
 
+/* Dai chu chay cuoi Hero: marquee lien mach (noi dung nhan doi,
+   translateX 0 -> -50%). */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 36s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none;
+  }
+}
+
 /* Custom smooth transitions for theme & layout */
 html {
   scroll-behavior: smooth;

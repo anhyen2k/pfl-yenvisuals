@@ -4,8 +4,9 @@
  */
 
 import React from 'react';
-import { ArrowDown, Aperture, Eye, GraduationCap, Check } from 'lucide-react';
+import { ArrowDown, Aperture, Eye, GraduationCap, Check, MessageCircle } from 'lucide-react';
 import { PhotoItem } from '../utils/portfolioLogic';
+import { SITE_CONFIG } from '../config/site';
 
 interface HeroProps {
   featuredPhoto: PhotoItem;
@@ -86,6 +87,16 @@ export const Hero: React.FC<HeroProps> = ({
               >
                 <span>Bảng Giá & Đặt Lịch</span>
               </button>
+
+              <a
+                href={SITE_CONFIG.zaloUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 px-6 py-3 text-xs font-semibold tracking-wider uppercase text-neutral-800 dark:text-neutral-200 bg-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 rounded-md transition-colors cursor-pointer"
+              >
+                <MessageCircle className="w-4 h-4" />
+                <span>Nhắn Zalo</span>
+              </a>
             </div>
 
             {/* Photographer signature */}
@@ -165,10 +176,10 @@ export const Hero: React.FC<HeroProps> = ({
           </div>
           <div className="space-y-1">
             <div className="text-2xl sm:text-3xl font-serif font-medium text-neutral-900 dark:text-white tabular-nums">
-              100%
+              5–15 bạn
             </div>
             <div className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
-              Tận Tâm Hướng Dẫn Tạo Dáng
+              Nhóm Nhỏ Chụp Kĩ Từng Bạn
             </div>
           </div>
           <div className="space-y-1">
@@ -181,35 +192,46 @@ export const Hero: React.FC<HeroProps> = ({
           </div>
           <div className="space-y-1">
             <div className="text-2xl sm:text-3xl font-serif font-medium text-neutral-900 dark:text-white">
-              Giá Mềm
+              Hà Nội
             </div>
             <div className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
-              Ưu Đãi Đặc Biệt Cho Học Sinh
+              Chỉ Chụp Ở Hà Nội
             </div>
           </div>
         </div>
       </div>
 
-      {/* Subtle Marquee Divider Ribbon (Mandatory Section Divider from §2.B) */}
+      {/* Subtle Marquee Divider Ribbon (Mandatory Section Divider from §2.B) —
+          chay that bang CSS animation (.animate-marquee trong index.css);
+          noi dung nhan doi de chay lien mach (translateX 0 -> -50%). */}
       <div className="mt-12 py-3 bg-neutral-100 dark:bg-neutral-900/60 border-y border-neutral-200 dark:border-neutral-800 overflow-hidden whitespace-nowrap">
-        <div className="inline-flex items-center gap-8 text-xs font-mono uppercase tracking-widest text-neutral-500 dark:text-neutral-400">
-          <span>KỈ YẾU HỌC SINH & SINH VIÊN</span>
-          <span aria-hidden="true">·</span>
-          <span>ÁO DÀI TRẮNG THANH XUÂN</span>
-          <span aria-hidden="true">·</span>
-          <span>ÁO CỬ NHÂN TỐT NGHIỆP</span>
-          <span aria-hidden="true">·</span>
-          <span>CỔ PHỤC NHẬT BÌNH & NGŨ THÂN</span>
-          <span aria-hidden="true">·</span>
-          <span>MÙA THU PHAN ĐÌNH PHÙNG</span>
-          <span aria-hidden="true">·</span>
-          <span>HOÀNG THÀNH THĂNG LONG</span>
-          <span aria-hidden="true">·</span>
-          <span>SÂN TRƯỜNG CHU VĂN AN</span>
-          <span aria-hidden="true">·</span>
-          <span>VĂN MIẾU QUỐC TỬ GIÁM</span>
-          <span aria-hidden="true">·</span>
-          <span>NẮNG SỚM BỜ HỒ & HƯƠNG SEN TÂY HỒ</span>
+        <div className="flex w-max animate-marquee items-center">
+          {[0, 1].map((half) => (
+            <div
+              key={half}
+              aria-hidden={half === 1}
+              className="flex shrink-0 items-center gap-8 pr-8 text-xs font-mono uppercase tracking-widest text-neutral-500 dark:text-neutral-400"
+            >
+              <span>KỈ YẾU HỌC SINH & SINH VIÊN</span>
+              <span aria-hidden="true">·</span>
+              <span>ÁO DÀI TRẮNG THANH XUÂN</span>
+              <span aria-hidden="true">·</span>
+              <span>ÁO CỬ NHÂN TỐT NGHIỆP</span>
+              <span aria-hidden="true">·</span>
+              <span>CỔ PHỤC NHẬT BÌNH & NGŨ THÂN</span>
+              <span aria-hidden="true">·</span>
+              <span>MÙA THU PHAN ĐÌNH PHÙNG</span>
+              <span aria-hidden="true">·</span>
+              <span>HOÀNG THÀNH THĂNG LONG</span>
+              <span aria-hidden="true">·</span>
+              <span>SÂN TRƯỜNG CHU VĂN AN</span>
+              <span aria-hidden="true">·</span>
+              <span>VĂN MIẾU QUỐC TỬ GIÁM</span>
+              <span aria-hidden="true">·</span>
+              <span>NẮNG SỚM BỜ HỒ & HƯƠNG SEN TÂY HỒ</span>
+              <span aria-hidden="true">·</span>
+            </div>
+          ))}
         </div>
       </div>
     </section>

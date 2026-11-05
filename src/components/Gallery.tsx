@@ -5,9 +5,6 @@
 
 import React, { useState } from 'react';
 import {
-  Grid,
-  Columns3,
-  Rows3,
   Search,
   Heart,
   Maximize2,
@@ -41,8 +38,6 @@ interface GalleryProps {
   onDeletePhoto?: (photoId: string) => void;
 }
 
-type LayoutMode = 'bento' | 'grid' | 'stream';
-
 export const Gallery: React.FC<GalleryProps> = ({
   photos,
   selectedCategory,
@@ -58,17 +53,18 @@ export const Gallery: React.FC<GalleryProps> = ({
   onEditPhoto,
   onDeletePhoto,
 }) => {
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('bento');
   const [copiedFavorites, setCopiedFavorites] = useState(false);
 
   // Nhan tab danh muc lay tu bang dung chung, chi 'all' la ngoai le (khong co trong CATEGORY_LABELS).
+  // 'aodai-pho' (2 anh) + 'nang-tho' (2 anh) gop thanh 1 tab 'aodai-pho-nang-tho'
+  // (moi tab cu deu < 3 anh); key gop duoc filterPhotos() map sang 2 key cu
+  // nen loc van dung — xem ghi chu o filterPhotos trong portfolioLogic.ts.
   const categories: { key: PhotoCategory; label: string }[] = [
     { key: 'all', label: 'Tất Cả Album' },
     { key: 'aodai-trang', label: CATEGORY_LABELS['aodai-trang'] },
     { key: 'kiyieu-nhom', label: CATEGORY_LABELS['kiyieu-nhom'] },
     { key: 'cophuc', label: CATEGORY_LABELS['cophuc'] },
-    { key: 'aodai-pho', label: CATEGORY_LABELS['aodai-pho'] },
-    { key: 'nang-tho', label: CATEGORY_LABELS['nang-tho'] },
+    { key: 'aodai-pho-nang-tho' as PhotoCategory, label: 'Áo Dài & Nàng Thơ' },
   ];
 
   // Anh yeu thich hien co trong danh sach anh dang hien thi (theo favoriteIds).
@@ -130,52 +126,6 @@ export const Gallery: React.FC<GalleryProps> = ({
           <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-2 max-w-xl">
             Toàn bộ ảnh được chụp bằng máy ảnh Full-frame Sony A7 Mark III với màu sắc trong trẻo, tự nhiên, bắt trọn từng nụ cười rạng rỡ và nét duyên dáng tà áo dài.
           </p>
-        </div>
-
-        {/* Layout Mode Switcher */}
-        <div className="flex items-center gap-2 self-start md:self-auto">
-          <span className="text-xs font-mono text-neutral-500 mr-1 hidden sm:inline">Chế độ xem:</span>
-          <div className="flex items-center bg-neutral-100 dark:bg-neutral-800 p-1 rounded-lg">
-            <button
-              type="button"
-              onClick={() => setLayoutMode('bento')}
-              className={`p-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${
-                layoutMode === 'bento'
-                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs'
-                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-              title="Bố cục Bento biên tập"
-            >
-              <Grid className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Bento</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLayoutMode('grid')}
-              className={`p-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${
-                layoutMode === 'grid'
-                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs'
-                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-              title="Lưới 3 cột đồng nhất"
-            >
-              <Columns3 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Lưới 3 Cột</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLayoutMode('stream')}
-              className={`p-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${
-                layoutMode === 'stream'
-                  ? 'bg-white dark:bg-neutral-900 text-neutral-900 dark:text-white shadow-xs'
-                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-              title="Dòng ảnh tạp chí lớn"
-            >
-              <Rows3 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Toàn Cảnh</span>
-            </button>
-          </div>
         </div>
       </div>
 
@@ -296,7 +246,7 @@ export const Gallery: React.FC<GalleryProps> = ({
       )}
 
       {/* Gallery Layout: Bento Mode */}
-      {layoutMode === 'bento' && photos.length > 0 && (
+      {photos.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {photos.map((photo, idx) => {
             const isWide = (idx % 5 === 0 || idx % 7 === 0) && photo.orientation === 'landscape';
@@ -406,184 +356,6 @@ export const Gallery: React.FC<GalleryProps> = ({
         </div>
       )}
 
-      {/* Gallery Layout: Uniform 3-Column Grid */}
-      {layoutMode === 'grid' && photos.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {photos.map((photo) => (
-            <div
-              key={photo.id}
-              className="group relative rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 transition-all hover:border-amber-400 dark:hover:border-amber-500/50"
-            >
-              <div
-                className="aspect-[4/3] w-full overflow-hidden relative cursor-pointer"
-                onClick={() => onSelectPhoto(photo)}
-              >
-                <img
-                  src={photo.image}
-                  alt={photo.vietnameseTitle}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-transparent opacity-85" />
-
-                {/* Top Right Actions */}
-                <div className="absolute top-3.5 right-3.5 flex items-center gap-1.5 z-20">
-                  {isAdmin && onEditPhoto && onDeletePhoto && (
-                    <div className="flex items-center gap-1 bg-black/60 backdrop-blur-md rounded-full p-0.5 border border-amber-500/40 shadow-lg">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditPhoto(photo);
-                        }}
-                        className="p-1.5 rounded-full hover:bg-amber-600 text-amber-200 hover:text-white transition-colors cursor-pointer"
-                        title="Sửa thông tin ảnh (Admin)"
-                        aria-label="Sửa ảnh"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeletePhoto(photo.id);
-                        }}
-                        className="p-1.5 rounded-full hover:bg-red-600 text-red-300 hover:text-white transition-colors cursor-pointer"
-                        title="Xoá ảnh (Admin)"
-                        aria-label="Xoá ảnh"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => onToggleFavorite(photo.id, e)}
-                    className="p-2 rounded-full bg-black/40 hover:bg-black/70 text-white backdrop-blur-sm transition-colors cursor-pointer"
-                    aria-label="Thích ảnh"
-                  >
-                    <Heart
-                      className={`w-4 h-4 ${
-                        favoriteIds.includes(photo.id) ? 'fill-rose-500 text-rose-500' : 'text-white'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
-                  <div className="text-[11px] font-mono text-neutral-300 flex items-center gap-1.5 mb-1">
-                    <span>{photo.location.split(',')[0]}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{photo.year}</span>
-                  </div>
-                  <h3 className="text-base font-serif font-medium line-clamp-1">
-                    {photo.vietnameseTitle}
-                  </h3>
-                  <div className="text-[11px] text-neutral-300 font-mono mt-0.5">
-                    {formatExifString(photo)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Gallery Layout: Large Monograph Stream */}
-      {layoutMode === 'stream' && photos.length > 0 && (
-        <div className="space-y-16 max-w-4xl mx-auto">
-          {photos.map((photo) => (
-            <article
-              key={photo.id}
-              className="border-b border-neutral-200 dark:border-neutral-800 pb-14 last:border-b-0"
-            >
-              <div
-                className="relative rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 cursor-pointer group"
-                onClick={() => onSelectPhoto(photo)}
-              >
-                <div className="aspect-[16/9] w-full">
-                  <img
-                    src={photo.image}
-                    alt={photo.vietnameseTitle}
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-102"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-                  {isAdmin && onEditPhoto && onDeletePhoto && (
-                    <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md rounded-full px-2 py-1 border border-amber-500/40 shadow-lg text-white">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditPhoto(photo);
-                        }}
-                        className="p-1.5 rounded-full hover:bg-amber-600 text-amber-200 hover:text-white transition-colors cursor-pointer flex items-center gap-1 text-xs"
-                        title="Sửa thông tin ảnh (Admin)"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Sửa</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeletePhoto(photo.id);
-                        }}
-                        className="p-1.5 rounded-full hover:bg-red-600 text-red-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1 text-xs"
-                        title="Xoá ảnh (Admin)"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Xoá</span>
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => onToggleFavorite(photo.id, e)}
-                    className="p-2.5 rounded-full bg-black/50 hover:bg-black/80 text-white backdrop-blur-sm transition-colors cursor-pointer"
-                  >
-                    <Heart
-                      className={`w-4 h-4 ${
-                        favoriteIds.includes(photo.id) ? 'fill-rose-500 text-rose-500' : 'text-white'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Storytelling notes below the large frame */}
-              <div className="mt-6 flex flex-col md:flex-row md:items-start justify-between gap-6">
-                <div className="md:max-w-xl">
-                  <div className="text-xs font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-1">
-                    {photo.location} · {photo.year} · {photo.conceptNote || 'Kỉ Yếu & Áo Dài'}
-                  </div>
-                  <h3 className="text-2xl font-serif text-neutral-900 dark:text-white">
-                    {photo.vietnameseTitle}
-                  </h3>
-                  <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-2 leading-relaxed">
-                    {photo.story || photo.description}
-                  </p>
-                </div>
-
-                <div className="p-4 rounded-lg bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono space-y-1.5 shrink-0 min-w-56">
-                  <div className="text-neutral-500 uppercase text-[10px] tracking-wider">Thông Số Kỹ Thuật (EXIF)</div>
-                  <div className="text-neutral-900 dark:text-neutral-100">{photo.camera}</div>
-                  <div className="text-neutral-600 dark:text-neutral-400">{photo.lens}</div>
-                  <div className="text-neutral-700 dark:text-neutral-300 pt-1 border-t border-neutral-200 dark:border-neutral-800">
-                    {formatExifString(photo)}
-                  </div>
-                  {photo.edition && (
-                    <div className="text-amber-600 dark:text-amber-400 text-[11px] pt-1">
-                      {photo.edition}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
     </section>
   );
 };

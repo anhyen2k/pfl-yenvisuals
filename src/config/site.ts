@@ -3,13 +3,17 @@
 export const SITE_CONFIG = {
   photographerName: 'Anh Yên',
   photographerEmail: 'anhyenk26@gmail.com',
-  phone: '0912888266',
-  phoneDisplay: '0912 888 266',
-  zaloUrl: 'https://zalo.me/0912888266',
+  phone: '0961230500',
+  phoneDisplay: '0961 230 500',
+  zaloUrl: 'https://zalo.me/0961230500',
   city: 'Hà Nội',
   siteUrl: 'https://anhyen2k.github.io/pfl-yenvisuals/',
   brandName: 'Yên Photo',
 } as const;
+
+// Email quan tri duy nhat duoc vao Dashboard — co dinh, khong lay tu
+// email nhan don (photographerEmail, sua duoc trong Dashboard Settings).
+export const ADMIN_EMAIL = 'anhyenk26@gmail.com';
 
 export function generateZaloUrl(phone: string): string {
   return `https://zalo.me/${phone.replace(/[^0-9]/g, '')}`;

@@ -29,10 +29,12 @@ import {
   deleteObject,
 } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { validatePackagePrices } from '../utils/portfolioLogic';
 import type {
   BookingLead,
   BookingStatus,
   EmailNotificationLog,
+  PackagePrices,
   PhotoItem,
 } from '../utils/portfolioLogic';
 
@@ -405,5 +407,93 @@ export async function seedMissingPortfolioPhotos(initialPhotos: PhotoItem[]): Pr
       await setDoc(doc(db, path, photo.id), photo);
     }
   }
+}
+
+// --- Bang gia goi (settings/pricing) ---
+// Doc `settings/pricing` luu { prices: PackagePrices, updatedAt, updatedBy }.
+// Public duoc doc (khach xem gia), chi admin duoc ghi (xem firestore.rules).
+
+function isCompletePackagePrices(value: unknown): value is PackagePrices {
+  if (!value || typeof value !== 'object') return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p['aodai-solo'] === 'number' &&
+    typeof p['kiyieu-lop'] === 'number' &&
+    typeof p['cophuc-heritage'] === 'number' &&
+    typeof p['photobook-print'] === 'number' &&
+    typeof p.extraPerPerson === 'number'
+  );
+}
+
+/**
+ * Doc bang gia hien tai, hoac null neu chua co doc / du lieu khong hop le.
+ */
+export async function loadPackagePrices(): Promise<PackagePrices | null> {
+  const snap = await getDoc(doc(db, 'settings', 'pricing'));
+  if (!snap.exists()) return null;
+  const prices = (snap.data() as Record<string, unknown>).prices;
+  if (!isCompletePackagePrices(prices)) return null;
+  if (validatePackagePrices(prices).length > 0) return null;
+  return prices;
+}
+
+export interface PackagePricesMeta {
+  prices: PackagePrices;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/**
+ * Doc bang gia kem thoi gian luu lan cuoi (de Dashboard hien "Luu lan cuoi").
+ */
+export async function loadPackagePricesMeta(): Promise<PackagePricesMeta | null> {
+  const snap = await getDoc(doc(db, 'settings', 'pricing'));
+  if (!snap.exists()) return null;
+  const data = snap.data() as Record<string, unknown>;
+  const prices = data.prices;
+  if (!isCompletePackagePrices(prices)) return null;
+  if (validatePackagePrices(prices).length > 0) return null;
+  return {
+    prices,
+    updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : undefined,
+    updatedBy: typeof data.updatedBy === 'string' ? data.updatedBy : undefined,
+  };
+}
+
+/**
+ * Luu bang gia goi (chi admin goi; firestore.rules chan nguoi khac).
+ */
+export async function savePackagePrices(prices: PackagePrices): Promise<void> {
+  await setDoc(
+    doc(db, 'settings', 'pricing'),
+    {
+      prices,
+      updatedAt: new Date().toISOString(),
+      updatedBy: auth.currentUser?.email || '',
+    },
+    { merge: true }
+  );
+}
+
+/**
+ * Lang nghe bang gia goi theo thoi gian thuc. Chi goi cb khi doc ton tai
+ * va du lieu day du + hop le (validatePackagePrices khong loi).
+ * Tra ve ham unsubscribe.
+ */
+export function subscribeToPackagePrices(cb: (p: PackagePrices) => void): () => void {
+  return onSnapshot(
+    doc(db, 'settings', 'pricing'),
+    (snapshot) => {
+      if (!snapshot.exists()) return;
+      const prices = (snapshot.data() as Record<string, unknown>).prices;
+      if (!isCompletePackagePrices(prices)) return;
+      if (validatePackagePrices(prices).length > 0) return;
+      cb(prices);
+    },
+    (error) => {
+      console.warn('Package prices subscription warning:', error);
+      // KHONG throw trong callback onSnapshot: loi se thanh uncaught exception.
+    }
+  );
 }
 

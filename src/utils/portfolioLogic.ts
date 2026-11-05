@@ -4,7 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
-import { SITE_CONFIG } from '../config/site';
+import { SITE_CONFIG, ADMIN_EMAIL } from '../config/site';
 
 // --- Bang dung chung (diem 2, 5, 8, 9) — chi Ha Noi, khong them Sai Gon ---
 export const CATEGORY_LABELS: Record<Exclude<PhotoCategory, 'all'>, string> = {
@@ -122,11 +122,59 @@ export interface BookingInquiry {
   message: string;
 }
 
+export type PackagePrices = {
+  'aodai-solo': number;
+  'kiyieu-lop': number;
+  'cophuc-heritage': number;
+  'photobook-print': number;
+  extraPerPerson: number;
+};
+
+export const DEFAULT_PACKAGE_PRICES: PackagePrices = {
+  'aodai-solo': 650000,
+  'kiyieu-lop': 1200000,
+  'cophuc-heritage': 850000,
+  'photobook-print': 450000,
+  extraPerPerson: 80000,
+};
+
+const PACKAGE_PRICE_LABELS: Record<keyof PackagePrices, string> = {
+  'aodai-solo': 'Giá gói Áo dài solo',
+  'kiyieu-lop': 'Giá gói Kỉ yếu nhóm lớp',
+  'cophuc-heritage': 'Giá gói Cổ phục heritage',
+  'photobook-print': 'Giá gói Photobook / rửa ảnh',
+  extraPerPerson: 'Phụ phí mỗi người vượt nhóm',
+};
+
+/**
+ * Kiem tra bang gia goi: tra ve mang loi tieng Viet, rong la hop le.
+ * Moi gia goi la so nguyen > 0, tu 50.000 den 10.000.000 VNĐ;
+ * extraPerPerson la so nguyen tu 0 den 500.000 VNĐ.
+ * Chi kiem tra cac truong co trong `p` (Partial) — truong vang thi bo qua.
+ */
+export function validatePackagePrices(p: Partial<PackagePrices>): string[] {
+  const errors: string[] = [];
+  (Object.keys(PACKAGE_PRICE_LABELS) as (keyof PackagePrices)[]).forEach((key) => {
+    const value = p[key];
+    if (value === undefined) return;
+    if (key === 'extraPerPerson') {
+      if (!Number.isInteger(value) || value < 0 || value > 500000) {
+        errors.push(`${PACKAGE_PRICE_LABELS[key]} phải là số nguyên từ 0 đến 500.000 VNĐ.`);
+      }
+      return;
+    }
+    if (!Number.isInteger(value) || value < 50000 || value > 10000000) {
+      errors.push(`${PACKAGE_PRICE_LABELS[key]} phải là số nguyên từ 50.000 đến 10.000.000 VNĐ.`);
+    }
+  });
+  return errors;
+}
+
 // Tinh gia uoc tinh: goi nhom 5-15 ban gia goc 1.200k, vuot 15 thi +80k/nguoi vuot.
-export function calculateEstimatedPrice(packageType: BookingInquiry['packageType'], groupCount?: number): number {
-  const base = getPackageDetails(packageType).basePriceVND;
+export function calculateEstimatedPrice(packageType: BookingInquiry['packageType'], groupCount?: number, prices: PackagePrices = DEFAULT_PACKAGE_PRICES): number {
+  const base = getPackageDetails(packageType, prices).basePriceVND;
   if (packageType === 'kiyieu-lop' && groupCount && groupCount > 15) {
-    return base + (groupCount - 15) * 80000;
+    return base + (groupCount - 15) * prices.extraPerPerson;
   }
   return base;
 }
@@ -147,9 +195,16 @@ export function filterPhotos(
   seriesTitleById: Record<string, string> = {}
 ): PhotoItem[] {
   return photos.filter((photo) => {
-    // Category check
-    if (category !== 'all' && photo.category !== category) {
-      return false;
+    // Category check. Key gop 'aodai-pho-nang-tho' (tab Gallery, do 2 tab cu
+    // moi tab < 3 anh) map sang 2 category that 'aodai-pho' + 'nang-tho'.
+    // Key gop khong co trong PhotoCategory/CATEGORY_LABELS de Add/EditPhotoModal
+    // khong hien no nhu 1 category that khi them/sua anh.
+    if (category !== 'all') {
+      if (category === 'aodai-pho-nang-tho') {
+        if (photo.category !== 'aodai-pho' && photo.category !== 'nang-tho') return false;
+      } else if (photo.category !== category) {
+        return false;
+      }
     }
 
     // Favorites check
@@ -232,13 +287,13 @@ export function formatVND(amount: number): string {
 /**
  * Estimates quotation and deliverables for Kỉ Yếu & Áo Dài photography packages
  */
-export function getPackageDetails(packageType: BookingInquiry['packageType']) {
+export function getPackageDetails(packageType: BookingInquiry['packageType'], prices: PackagePrices = DEFAULT_PACKAGE_PRICES) {
   switch (packageType) {
     case 'aodai-solo':
       return {
         name: 'Áo Dài Nàng Thơ & Cá Nhân (Giá Sinh Viên — Sony A7 Mark III)',
-        basePriceVND: 650000,
-        formattedPrice: formatVND(650000),
+        basePriceVND: prices['aodai-solo'],
+        formattedPrice: formatVND(prices['aodai-solo']),
         duration: '1.5 - 2 giờ chụp thoải mái',
         deliverables: [
           'Chụp bằng máy ảnh Full-frame Sony A7 Mark III sắc nét, màu trong trẻo',
@@ -251,8 +306,8 @@ export function getPackageDetails(packageType: BookingInquiry['packageType']) {
     case 'kiyieu-lop':
       return {
         name: 'Kỉ Yếu Nhóm Bạn Thân & Nhóm Nhỏ (5 - 15 bạn)',
-        basePriceVND: 1200000,
-        formattedPrice: `${formatVND(1200000)} (Chỉ ~80k - 240k/bạn)`,
+        basePriceVND: prices['kiyieu-lop'],
+        formattedPrice: `${formatVND(prices['kiyieu-lop'])} (Chỉ ~${Math.round(prices['kiyieu-lop'] / 15 / 1000)}k - ${Math.round(prices['kiyieu-lop'] / 5 / 1000)}k/bạn)`,
         duration: '2.5 - 3.5 giờ chụp ngoại cảnh',
         deliverables: [
           'Chụp nhóm nhỏ tận tâm, chăm chút từng bạn (không lo bị bỏ quên như đi đoàn đông)',
@@ -265,8 +320,8 @@ export function getPackageDetails(packageType: BookingInquiry['packageType']) {
     case 'cophuc-heritage':
       return {
         name: 'Áo Dài Cổ Phục & Mùa Thu Hà Nội',
-        basePriceVND: 850000,
-        formattedPrice: formatVND(850000),
+        basePriceVND: prices['cophuc-heritage'],
+        formattedPrice: formatVND(prices['cophuc-heritage']),
         duration: '2 giờ chụp tại di tích / phố cổ',
         deliverables: [
           'Địa điểm: Hoàng Thành Thăng Long, Văn Miếu hoặc phố Phan Đình Phùng',
@@ -278,8 +333,8 @@ export function getPackageDetails(packageType: BookingInquiry['packageType']) {
     case 'photobook-print':
       return {
         name: 'Gói Rửa Ảnh & Set Ảnh Kỉ Niệm Để Bàn',
-        basePriceVND: 450000,
-        formattedPrice: formatVND(450000),
+        basePriceVND: prices['photobook-print'],
+        formattedPrice: formatVND(prices['photobook-print']),
         duration: 'In ấn & hoàn thiện 2-3 ngày',
         deliverables: [
           'In 20 ảnh lụa mini 10x15cm kẹp sổ lưu bút hoặc treo dây kẹp gỗ',
@@ -457,9 +512,10 @@ export function calculateDashboardStats(leads: BookingLead[], photosCount: numbe
  */
 export function generateEmailNotification(
   lead: BookingLead,
-  photographerEmail: string = SITE_CONFIG.photographerEmail
+  photographerEmail: string = SITE_CONFIG.photographerEmail,
+  prices: PackagePrices = DEFAULT_PACKAGE_PRICES
 ): EmailNotificationLog {
-  const pkg = getPackageDetails(lead.packageType);
+  const pkg = getPackageDetails(lead.packageType, prices);
   const now = new Date().toLocaleString('vi-VN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -527,9 +583,10 @@ Hệ thống tự động đồng bộ từ website ${SITE_CONFIG.siteUrl}
  */
 export function createBookingLead(
   inquiry: BookingInquiry,
-  photographerEmail: string = SITE_CONFIG.photographerEmail
+  photographerEmail: string = SITE_CONFIG.photographerEmail,
+  prices: PackagePrices = DEFAULT_PACKAGE_PRICES
 ): { lead: BookingLead; emailLog: EmailNotificationLog } {
-  const pkg = getPackageDetails(inquiry.packageType);
+  const pkg = getPackageDetails(inquiry.packageType, prices);
   const now = new Date().toLocaleString('vi-VN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -540,7 +597,7 @@ export function createBookingLead(
 
   const leadId = `KY-${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 90)}`;
 
-  const estimatedPrice = calculateEstimatedPrice(inquiry.packageType, inquiry.groupCount);
+  const estimatedPrice = calculateEstimatedPrice(inquiry.packageType, inquiry.groupCount, prices);
   const depositAmount = calculateDepositAmount(estimatedPrice);
   const lead: BookingLead = {
     ...inquiry,
@@ -559,7 +616,7 @@ export function createBookingLead(
     emailSentAt: now,
   };
 
-  const emailLog = generateEmailNotification(lead, photographerEmail);
+  const emailLog = generateEmailNotification(lead, photographerEmail, prices);
 
   return { lead, emailLog };
 }
@@ -716,9 +773,10 @@ export function exportLeadsToExcel(leads: BookingLead[]): Uint8Array {
  */
 export async function sendBookingEmailReal(
   lead: BookingLead,
-  targetEmail: string = SITE_CONFIG.photographerEmail
+  targetEmail: string = SITE_CONFIG.photographerEmail,
+  prices: PackagePrices = DEFAULT_PACKAGE_PRICES
 ): Promise<{ success: boolean; message: string; method: 'airform' | 'offline_logged' }> {
-  const pkg = getPackageDetails(lead.packageType);
+  const pkg = getPackageDetails(lead.packageType, prices);
 
   const cleanEmail = (targetEmail || SITE_CONFIG.photographerEmail).trim().toLowerCase();
 
@@ -866,3 +924,13 @@ export function getRolePermissions(role: UserRole): RolePermissions {
   };
 }
 
+
+/**
+ * Kiem tra email co phai tai khoan quan tri khong. So sanh voi ADMIN_EMAIL
+ * co dinh (khong dung email nhan don photographerEmail, vi gia tri do sua
+ * duoc trong Dashboard Settings va co the bi doi / dinh khoang trang).
+ * Chuan hoa ca 2 ben: cat khoang trang dau/cuoi, doi ve chu thuong.
+ */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  return (email ?? '').trim().toLowerCase() === ADMIN_EMAIL;
+}
