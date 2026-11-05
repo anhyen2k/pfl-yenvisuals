@@ -614,6 +614,29 @@ test('content: sanitize loai bo the HTML, cat chuoi qua dai', () => {
   assert.ok(!merged.heroTitle.includes('<'));
 });
 
+test('content (v7.1): nut Hero mac dinh khop hanh dong — chinh mo dat lich, phu xem album', () => {
+  assert.ok(DEFAULT_SITE_CONTENT.heroPrimaryCta.includes('Đặt Lịch'));
+  assert.ok(DEFAULT_SITE_CONTENT.heroSecondaryCta.includes('Album'));
+});
+
+test('content (v7.1): mergeSiteContent tu sua cap nhan Hero cu bi dao (v6)', () => {
+  const fixed = mergeSiteContent({
+    heroPrimaryCta: 'Xem Album Tác Phẩm',
+    heroSecondaryCta: 'Bảng Giá & Đặt Lịch',
+  });
+  assert.equal(fixed.heroPrimaryCta, 'Đặt Lịch Chụp');
+  assert.equal(fixed.heroSecondaryCta, 'Xem Album Tác Phẩm');
+});
+
+test('content (v7.1): mergeSiteContent giu nguyen cap nhan Hero dung', () => {
+  const kept = mergeSiteContent({
+    heroPrimaryCta: 'Đặt Lịch Chụp',
+    heroSecondaryCta: 'Xem Album Tác Phẩm',
+  });
+  assert.equal(kept.heroPrimaryCta, 'Đặt Lịch Chụp');
+  assert.equal(kept.heroSecondaryCta, 'Xem Album Tác Phẩm');
+});
+
 test('content: validate bao loi khi vuot gioi han, hop le thi rong', () => {
   assert.deepEqual(validateSiteContent(DEFAULT_SITE_CONTENT), []);
   assert.deepEqual(validateSiteContent({}), []);

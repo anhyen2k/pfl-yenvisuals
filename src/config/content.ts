@@ -20,9 +20,9 @@ export interface SiteContent {
   heroTitle: string;
   /** Hero: dong mo ta ngan duoi tieu de. */
   heroSubtitle: string;
-  /** Hero: nhan nut chinh (xem album). */
+  /** Hero: nhan nut chinh (mo form dat lich). */
   heroPrimaryCta: string;
-  /** Hero: nhan nut phu (bang gia & dat lich). */
+  /** Hero: nhan nut phu (cuon xuong xem album). */
   heroSecondaryCta: string;
   /** Marquee: dong chu chay cuoi Hero; cac muc cach nhau bang '·'. */
   marqueeText: string;
@@ -86,8 +86,8 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
   heroTitle: 'Lưu giữ thanh xuân trong trẻo & nét duyên tà áo dài Việt.',
   heroSubtitle:
     'Đồng hành cùng máy ảnh Full-frame Sony A7 Mark III trứ danh và sự tận tâm, mình kiên nhẫn hướng dẫn bạn từng góc nghiêng, nụ cười và dáng áo để bắt trọn những khoảnh khắc thanh xuân tự nhiên, rạng rỡ và giàu cảm xúc nhất.',
-  heroPrimaryCta: 'Xem Album Tác Phẩm',
-  heroSecondaryCta: 'Bảng Giá & Đặt Lịch',
+  heroPrimaryCta: 'Đặt Lịch Chụp',
+  heroSecondaryCta: 'Xem Album Tác Phẩm',
   marqueeText:
     'KỈ YẾU HỌC SINH & SINH VIÊN · ÁO DÀI TRẮNG THANH XUÂN · ÁO CỬ NHÂN TỐT NGHIỆP · CỔ PHỤC NHẬT BÌNH & NGŨ THÂN · MÙA THU PHAN ĐÌNH PHÙNG · HOÀNG THÀNH THĂNG LONG · SÂN TRƯỜNG CHU VĂN AN · VĂN MIẾU QUỐC TỬ GIÁM · NẮNG SỚM BỜ HỒ & HƯƠNG SEN TÂY HỒ',
   aboutName: 'Yên Nguyễn',
@@ -164,6 +164,19 @@ export function mergeSiteContent(input: unknown): SiteContent {
       const cleaned = sanitizePlainText(d[id], CONTENT_FIELD_LIMITS.packageDescription ?? 200);
       if (cleaned) out.packageDescriptions[id] = cleaned;
     }
+  }
+  // (v7.1) Migration cho du lieu da luu tu v6: cap nhan Hero cu bi dao
+  // (nut chinh lai ghi "Xem Album Tac Pham", nut phu lai ghi "Bang Gia &
+  // Dat Lich") trong khi Hero.tsx noi nut chinh -> mo form dat lich, nut
+  // phu -> cuon xuong xem album. Chi sua default trong code thi web van
+  // doc gia tri cu da luu tren Firestore/localStorage nen loi van con —
+  // gap dung cap cu nay thi tu doi lai cho dung truoc khi tra ve.
+  if (
+    out.heroPrimaryCta.trim() === 'Xem Album Tác Phẩm' &&
+    out.heroSecondaryCta.trim() === 'Bảng Giá & Đặt Lịch'
+  ) {
+    out.heroPrimaryCta = 'Đặt Lịch Chụp';
+    out.heroSecondaryCta = 'Xem Album Tác Phẩm';
   }
   return out;
 }

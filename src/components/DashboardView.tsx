@@ -172,14 +172,14 @@ const PACKAGE_FORM_META: { id: BookingLead['packageType']; name: string; desc: s
 // (v6) Nhom truong sua noi dung giao dien (tab Cai dat, muc 2).
 // Gioi han ky tu lay tu CONTENT_FIELD_LIMITS (config/content.ts).
 type ContentTextField = keyof Omit<SiteContent, 'packageDescriptions'>;
-const CONTENT_FORM_GROUPS: { title: string; fields: { key: ContentTextField; multiline?: boolean }[] }[] = [
+const CONTENT_FORM_GROUPS: { title: string; fields: { key: ContentTextField; multiline?: boolean; hint?: string }[] }[] = [
   {
     title: 'Hero — Tiêu đề, mô tả & nút bấm',
     fields: [
       { key: 'heroTitle', multiline: true },
       { key: 'heroSubtitle', multiline: true },
-      { key: 'heroPrimaryCta' },
-      { key: 'heroSecondaryCta' },
+      { key: 'heroPrimaryCta', hint: 'Nút chính — bấm vào sẽ mở form đặt lịch.' },
+      { key: 'heroSecondaryCta', hint: 'Nút phụ — bấm vào sẽ cuộn xuống xem album.' },
       { key: 'marqueeText', multiline: true },
     ],
   },
@@ -2005,7 +2005,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div key={group.title} className="space-y-3">
                     <div className="text-xs font-semibold text-neutral-900 dark:text-white">{group.title}</div>
                     <div className="grid grid-cols-1 gap-3">
-                      {group.fields.map(({ key, multiline }) => (
+                      {group.fields.map(({ key, multiline, hint }) => (
                         <label key={key} className="block text-xs">
                           <span className="text-neutral-600 dark:text-neutral-400">
                             {CONTENT_FIELD_LABELS[key]} (tối đa {CONTENT_FIELD_LIMITS[key]} ký tự)
@@ -2026,6 +2026,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               disabled={!isAdmin}
                               className="mt-1 w-full px-3 py-2 bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-white disabled:opacity-60"
                             />
+                          )}
+                          {hint && (
+                            <span className="mt-1 block text-neutral-500 dark:text-neutral-400">{hint}</span>
                           )}
                         </label>
                       ))}
