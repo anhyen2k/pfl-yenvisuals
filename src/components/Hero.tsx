@@ -4,14 +4,14 @@
  */
 
 /* v7 — Hero toi gian: 1 tieu de Fraunces, 1 dong phu, toi da 2 nut
-   (Dat lich = chinh, Nhan Zalo = phu), anh full-bleed 1 anh lon lam chu
-   dao. Bo 4 o so lieu, bo 3 o tin cay, bo badge may anh / phong to /
-   thanh trang thai — 3 thong tin tin cay chuyen gon vao About dang 1 dong. */
+   (v7.2: Xem Album = chinh, Nhan Zalo = phu; nut phu duoi anh mo form
+   dat lich), anh full-bleed 1 anh lon lam chu dao. Bo 4 o so lieu, bo 3
+   o tin cay, bo badge may anh / phong to / thanh trang thai — 3 thong tin
+   tin cay chuyen gon vao About dang 1 dong. */
 
 import React from 'react';
 import { ArrowDown, MessageCircle } from 'lucide-react';
-import { PhotoItem } from '../utils/portfolioLogic';
-import { SITE_CONFIG } from '../config/site';
+import { PhotoItem, describePhotoAlt } from '../utils/portfolioLogic';
 import { DEFAULT_SITE_CONTENT, splitMarqueeItems, type SiteContent } from '../config/content';
 
 interface HeroProps {
@@ -19,6 +19,8 @@ interface HeroProps {
   onExploreGallery: () => void;
   onSelectPhoto: (photo: PhotoItem) => void;
   onOpenBooking: () => void;
+  /** Mo modal ma QR Zalo (v7.4) thay vi mo thang link zalo.me. */
+  onOpenZaloQr: () => void;
   /** Noi dung giao dien (tu App / Firestore); khong truyen thi dung mac dinh. */
   content?: SiteContent;
 }
@@ -28,6 +30,7 @@ export const Hero: React.FC<HeroProps> = ({
   onExploreGallery,
   onSelectPhoto,
   onOpenBooking,
+  onOpenZaloQr,
   content,
 }) => {
   const c = content ?? DEFAULT_SITE_CONTENT;
@@ -51,25 +54,26 @@ export const Hero: React.FC<HeroProps> = ({
           {c.heroSubtitle}
         </p>
 
-        {/* Toi da 2 nut: Dat lich (chinh, amber) + Nhan Zalo (phu, outline) */}
+        {/* Toi da 2 nut: Xem Album (chinh, amber) + Nhan Zalo (phu, outline).
+            Yen quyet nut chinh la Xem Album (cuon xuong Gallery) vi tren web
+            da co nhieu nut dat lich (Navbar, the goi, nut phu duoi anh). */}
         <div className="mt-8 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={onOpenBooking}
+            onClick={onExploreGallery}
             className="inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors cursor-pointer"
           >
             <span>{c.heroPrimaryCta}</span>
           </button>
 
-          <a
-            href={SITE_CONFIG.zaloUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={onOpenZaloQr}
             className="inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold text-neutral-800 dark:text-neutral-200 bg-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg transition-colors cursor-pointer"
           >
             <MessageCircle className="w-4 h-4" />
             <span>Nhắn Zalo</span>
-          </a>
+          </button>
         </div>
 
         {/* Anh full-bleed 1 anh lon lam chu dao */}
@@ -80,7 +84,7 @@ export const Hero: React.FC<HeroProps> = ({
           >
             <img
               src={featuredPhoto.image}
-              alt={featuredPhoto.vietnameseTitle}
+              alt={describePhotoAlt(featuredPhoto)}
               className="w-full aspect-[16/10] sm:aspect-[16/8] object-cover transition-transform duration-700 ease-out group-hover:scale-[1.02]"
               referrerPolicy="no-referrer"
             />
@@ -98,7 +102,7 @@ export const Hero: React.FC<HeroProps> = ({
           <div className="mt-4 flex items-center justify-center">
             <button
               type="button"
-              onClick={onExploreGallery}
+              onClick={onOpenBooking}
               className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors cursor-pointer"
             >
               <span>{c.heroSecondaryCta}</span>

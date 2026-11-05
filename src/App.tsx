@@ -17,6 +17,7 @@ import { EditPhotoModal } from './components/EditPhotoModal';
 import { DeletePhotoModal } from './components/DeletePhotoModal';
 import { BookingModal } from './components/BookingModal';
 import { ClientProofingModal } from './components/ClientProofingModal';
+import { ZaloQrModal } from './components/ZaloQrModal';
 import { DashboardView } from './components/DashboardView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Lock } from 'lucide-react';
@@ -327,6 +328,7 @@ export default function App() {
   // Modal states
   const [selectedPhotoForLightbox, setSelectedPhotoForLightbox] = useState<PhotoItem | null>(null);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
+  const [isZaloQrOpen, setIsZaloQrOpen] = useState(false);
 
   // --- Clean paths (GitHub Pages, không dùng react-router) ---
   // /tac-pham -> #gallery, /bo-suu-tap -> #series, /ve-toi -> #about,
@@ -1029,6 +1031,7 @@ export default function App() {
               onExploreGallery={() => navigateToSection('gallery')}
               onSelectPhoto={(photo) => setSelectedPhotoForLightbox(photo)}
               onOpenBooking={() => setIsBookingOpen(true)}
+              onOpenZaloQr={() => setIsZaloQrOpen(true)}
               content={siteContent}
             />
 
@@ -1060,7 +1063,7 @@ export default function App() {
             <AboutSection content={siteContent} />
 
             {/* Consultation & Studio Contact */}
-            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} leads={leads} content={siteContent} />
+            <ContactSection onOpenBooking={() => setIsBookingOpen(true)} onOpenZaloQr={() => setIsZaloQrOpen(true)} leads={leads} content={siteContent} />
           </main>
 
           {/* Minimalist Footer with discreet Admin Entry */}
@@ -1117,7 +1120,11 @@ export default function App() {
         existingLeads={leads}
         initialPackage={bookingPackage}
         packagePrices={packagePrices}
+        onOpenZaloQr={() => setIsZaloQrOpen(true)}
       />
+
+      {/* Zalo QR Modal (v7.4: nut "Nhan Zalo" mo modal nay thay vi mo thang zalo.me) */}
+      <ZaloQrModal isOpen={isZaloQrOpen} onClose={() => setIsZaloQrOpen(false)} />
 
       {/* Add Custom Photography Modal (Admin only) */}
       <AddPhotoModal

@@ -47,6 +47,7 @@ import {
   exportLeadsToExcel,
   getPackageDetails,
   sendBookingEmailReal,
+  describePhotoAlt,
   DEFAULT_PACKAGE_PRICES,
   validatePackagePrices,
   type PackagePrices,
@@ -178,8 +179,8 @@ const CONTENT_FORM_GROUPS: { title: string; fields: { key: ContentTextField; mul
     fields: [
       { key: 'heroTitle', multiline: true },
       { key: 'heroSubtitle', multiline: true },
-      { key: 'heroPrimaryCta', hint: 'Nút chính — bấm vào sẽ mở form đặt lịch.' },
-      { key: 'heroSecondaryCta', hint: 'Nút phụ — bấm vào sẽ cuộn xuống xem album.' },
+      { key: 'heroPrimaryCta', hint: 'Nút chính — bấm vào sẽ cuộn xuống xem album.' },
+      { key: 'heroSecondaryCta', hint: 'Nút phụ — bấm vào sẽ mở form đặt lịch.' },
       { key: 'marqueeText', multiline: true },
     ],
   },
@@ -1857,7 +1858,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <div className="aspect-[4/3] rounded-lg overflow-hidden relative bg-neutral-100 dark:bg-neutral-900">
                     <img
                       src={photo.thumbUrl || photo.image}
-                      alt={photo.vietnameseTitle}
+                      alt={describePhotoAlt(photo)}
                       loading="lazy"
                       decoding="async"
                       className="w-full h-full object-cover"

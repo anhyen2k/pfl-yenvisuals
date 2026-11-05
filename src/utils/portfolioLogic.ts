@@ -256,6 +256,21 @@ export function formatExifString(photo: Partial<PhotoItem>): string {
 }
 
 /**
+ * Alt text mô tả thật cho ảnh (SEO + trợ năng): tiêu đề tiếng Việt của ảnh,
+ * kèm địa điểm chụp nếu tiêu đề chưa nhắc tới địa điểm đó.
+ */
+export function describePhotoAlt(photo: { vietnameseTitle?: string; location?: string }): string {
+  const title = (photo.vietnameseTitle || '').trim();
+  const location = (photo.location || '').trim();
+  if (!title) return location ? `Ảnh chụp tại ${location} — Yên Photo` : 'Ảnh chụp bởi Yên Photo';
+  if (!location) return title;
+  // Tránh lặp: tiêu đề đã chứa địa điểm thì giữ nguyên tiêu đề.
+  const firstWord = location.split(/[\s,&—–-]+/).filter(Boolean)[0] || '';
+  if (firstWord && title.toLowerCase().includes(firstWord.toLowerCase())) return title;
+  return `${title} — ${location}`;
+}
+
+/**
  * Calculate portfolio statistics for insights and curatorial overview
  */
 export function calculatePortfolioStats(photos: PhotoItem[]) {

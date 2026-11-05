@@ -54,6 +54,8 @@ interface BookingModalProps {
   initialPackage?: BookingInquiry['packageType'];
   /** Bang gia hien hanh (tu App / Firestore); khong truyen thi dung gia mac dinh. */
   packagePrices?: PackagePrices;
+  /** Mo modal ma QR Zalo (v7.4) thay vi mo thang link zalo.me. */
+  onOpenZaloQr?: () => void;
 }
 
 const SCHOOL_OPTION = 'Trường học (ghi rõ tên trường)';
@@ -104,6 +106,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   existingLeads = [],
   initialPackage,
   packagePrices,
+  onOpenZaloQr,
 }) => {
   const effectivePrices = packagePrices ?? DEFAULT_PACKAGE_PRICES;
   const initialPkg = initialPackage ?? 'aodai-solo';
@@ -513,15 +516,26 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
             {/* Quick action buttons: Direct Zalo / Close */}
             <div className="space-y-2.5 pt-2">
-              <a
-                href={SITE_CONFIG.zaloUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition-colors cursor-pointer"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>Nhắn Zalo Trực Tiếp Với Anh Yên ({SITE_CONFIG.phoneDisplay})</span>
-              </a>
+              {onOpenZaloQr ? (
+                <button
+                  type="button"
+                  onClick={onOpenZaloQr}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition-colors cursor-pointer"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Nhắn Zalo Trực Tiếp Với Anh Yên ({SITE_CONFIG.phoneDisplay})</span>
+                </button>
+              ) : (
+                <a
+                  href={SITE_CONFIG.zaloUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition-colors cursor-pointer"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Nhắn Zalo Trực Tiếp Với Anh Yên ({SITE_CONFIG.phoneDisplay})</span>
+                </a>
+              )}
 
               <button
                 type="button"

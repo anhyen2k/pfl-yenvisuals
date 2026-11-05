@@ -18,12 +18,14 @@ import {
 
 interface ContactSectionProps {
   onOpenBooking: () => void;
+  /** Mo modal ma QR Zalo (v7.4) thay vi mo thang link zalo.me. */
+  onOpenZaloQr: () => void;
   leads?: BookingLead[];
   /** Noi dung giao dien (tu App / Firestore); khong truyen thi dung mac dinh. */
   content?: SiteContent;
 }
 
-export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, leads = [], content }) => {
+export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, onOpenZaloQr, leads = [], content }) => {
   const c = content ?? DEFAULT_SITE_CONTENT;
   const [lookupCode, setLookupCode] = useState('');
   const [lookupPhone, setLookupPhone] = useState('');
@@ -191,15 +193,14 @@ export const ContactSection: React.FC<ContactSectionProps> = ({ onOpenBooking, l
 
         {/* Chi 3 kenh lien he (v7) + 1 dong mo ta gon */}
         <div className="max-w-2xl mx-auto mt-10 grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
-          <a
-            href={SITE_CONFIG.zaloUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] hover:border-amber-600/60 transition-colors"
+          <button
+            type="button"
+            onClick={onOpenZaloQr}
+            className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] hover:border-amber-600/60 transition-colors cursor-pointer text-center"
           >
             <div className="text-sm font-semibold text-neutral-900 dark:text-white">Nhắn Zalo</div>
             <div className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5 tabular-nums">{SITE_CONFIG.phoneDisplay}</div>
-          </a>
+          </button>
           <a
             href={`tel:${SITE_CONFIG.phone}`}
             className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#0c0c0e] hover:border-amber-600/60 transition-colors"

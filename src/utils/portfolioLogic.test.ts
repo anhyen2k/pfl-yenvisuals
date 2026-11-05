@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   filterPhotos,
   formatExifString,
+  describePhotoAlt,
   calculatePortfolioStats,
   validateBookingInquiry,
   getPackageDetails,
@@ -614,27 +615,36 @@ test('content: sanitize loai bo the HTML, cat chuoi qua dai', () => {
   assert.ok(!merged.heroTitle.includes('<'));
 });
 
-test('content (v7.1): nut Hero mac dinh khop hanh dong — chinh mo dat lich, phu xem album', () => {
-  assert.ok(DEFAULT_SITE_CONTENT.heroPrimaryCta.includes('Đặt Lịch'));
-  assert.ok(DEFAULT_SITE_CONTENT.heroSecondaryCta.includes('Album'));
+test('content (v7.2): nut Hero mac dinh khop hanh dong — chinh xem album, phu mo dat lich', () => {
+  assert.ok(DEFAULT_SITE_CONTENT.heroPrimaryCta.includes('Album'));
+  assert.ok(DEFAULT_SITE_CONTENT.heroSecondaryCta.includes('Đặt Lịch'));
 });
 
-test('content (v7.1): mergeSiteContent tu sua cap nhan Hero cu bi dao (v6)', () => {
+test('content (v7.2): mergeSiteContent hoan doi cap nhan Hero cua v7.1', () => {
+  const fixed = mergeSiteContent({
+    heroPrimaryCta: 'Đặt Lịch Chụp',
+    heroSecondaryCta: 'Xem Album Tác Phẩm',
+  });
+  assert.equal(fixed.heroPrimaryCta, 'Xem Album Tác Phẩm');
+  assert.equal(fixed.heroSecondaryCta, 'Đặt Lịch Chụp');
+});
+
+test('content (v7.2): mergeSiteContent sua cap nhan Hero cua v6 (phu "Bảng Giá & Đặt Lịch")', () => {
   const fixed = mergeSiteContent({
     heroPrimaryCta: 'Xem Album Tác Phẩm',
     heroSecondaryCta: 'Bảng Giá & Đặt Lịch',
   });
-  assert.equal(fixed.heroPrimaryCta, 'Đặt Lịch Chụp');
-  assert.equal(fixed.heroSecondaryCta, 'Xem Album Tác Phẩm');
+  assert.equal(fixed.heroPrimaryCta, 'Xem Album Tác Phẩm');
+  assert.equal(fixed.heroSecondaryCta, 'Đặt Lịch Chụp');
 });
 
-test('content (v7.1): mergeSiteContent giu nguyen cap nhan Hero dung', () => {
+test('content (v7.2): mergeSiteContent giu nguyen cap nhan Hero dung', () => {
   const kept = mergeSiteContent({
-    heroPrimaryCta: 'Đặt Lịch Chụp',
-    heroSecondaryCta: 'Xem Album Tác Phẩm',
+    heroPrimaryCta: 'Xem Album Tác Phẩm',
+    heroSecondaryCta: 'Đặt Lịch Chụp',
   });
-  assert.equal(kept.heroPrimaryCta, 'Đặt Lịch Chụp');
-  assert.equal(kept.heroSecondaryCta, 'Xem Album Tác Phẩm');
+  assert.equal(kept.heroPrimaryCta, 'Xem Album Tác Phẩm');
+  assert.equal(kept.heroSecondaryCta, 'Đặt Lịch Chụp');
 });
 
 test('content: validate bao loi khi vuot gioi han, hop le thi rong', () => {
@@ -656,4 +666,17 @@ test('content: splitMarqueeItems tach muc theo dau ·', () => {
   assert.equal(items[0], 'KỈ YẾU HỌC SINH & SINH VIÊN');
   assert.deepEqual(splitMarqueeItems('A · B ·  · C'), ['A', 'B', 'C']);
   assert.deepEqual(splitMarqueeItems(''), []);
+});
+
+test('seo: describePhotoAlt ghep tieu de + dia diem, khong lap lai dia diem', () => {
+  assert.equal(
+    describePhotoAlt({ vietnameseTitle: 'Hương Sen Bách Diệp', location: 'Tây Hồ, Hà Nội' }),
+    'Hương Sen Bách Diệp — Tây Hồ, Hà Nội'
+  );
+  assert.equal(
+    describePhotoAlt({ vietnameseTitle: 'Tà Áo Trắng Chu Văn An', location: 'Chu Văn An, Hà Nội' }),
+    'Tà Áo Trắng Chu Văn An'
+  );
+  assert.equal(describePhotoAlt({ vietnameseTitle: '', location: 'Văn Miếu' }), 'Ảnh chụp tại Văn Miếu — Yên Photo');
+  assert.equal(describePhotoAlt({}), 'Ảnh chụp bởi Yên Photo');
 });

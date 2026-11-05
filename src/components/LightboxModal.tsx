@@ -18,7 +18,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { PhotoItem, formatExifString } from '../utils/portfolioLogic';
+import { PhotoItem, formatExifString, describePhotoAlt } from '../utils/portfolioLogic';
 import { withBase } from '../utils/cleanPaths';
 
 interface LightboxModalProps {
@@ -273,7 +273,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
           >
             <img
               src={photo.image}
-              alt={photo.vietnameseTitle}
+              alt={describePhotoAlt(photo)}
               decoding="async"
               className="max-h-[80vh] max-w-[85vw] object-contain shadow-xl rounded-sm"
               referrerPolicy="no-referrer"

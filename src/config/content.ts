@@ -20,9 +20,9 @@ export interface SiteContent {
   heroTitle: string;
   /** Hero: dong mo ta ngan duoi tieu de. */
   heroSubtitle: string;
-  /** Hero: nhan nut chinh (mo form dat lich). */
+  /** Hero: nhan nut chinh (cuon xuong xem album). */
   heroPrimaryCta: string;
-  /** Hero: nhan nut phu (cuon xuong xem album). */
+  /** Hero: nhan nut phu (mo form dat lich). */
   heroSecondaryCta: string;
   /** Marquee: dong chu chay cuoi Hero; cac muc cach nhau bang '·'. */
   marqueeText: string;
@@ -86,8 +86,8 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
   heroTitle: 'Lưu giữ thanh xuân trong trẻo & nét duyên tà áo dài Việt.',
   heroSubtitle:
     'Đồng hành cùng máy ảnh Full-frame Sony A7 Mark III trứ danh và sự tận tâm, mình kiên nhẫn hướng dẫn bạn từng góc nghiêng, nụ cười và dáng áo để bắt trọn những khoảnh khắc thanh xuân tự nhiên, rạng rỡ và giàu cảm xúc nhất.',
-  heroPrimaryCta: 'Đặt Lịch Chụp',
-  heroSecondaryCta: 'Xem Album Tác Phẩm',
+  heroPrimaryCta: 'Xem Album Tác Phẩm',
+  heroSecondaryCta: 'Đặt Lịch Chụp',
   marqueeText:
     'KỈ YẾU HỌC SINH & SINH VIÊN · ÁO DÀI TRẮNG THANH XUÂN · ÁO CỬ NHÂN TỐT NGHIỆP · CỔ PHỤC NHẬT BÌNH & NGŨ THÂN · MÙA THU PHAN ĐÌNH PHÙNG · HOÀNG THÀNH THĂNG LONG · SÂN TRƯỜNG CHU VĂN AN · VĂN MIẾU QUỐC TỬ GIÁM · NẮNG SỚM BỜ HỒ & HƯƠNG SEN TÂY HỒ',
   aboutName: 'Yên Nguyễn',
@@ -165,18 +165,23 @@ export function mergeSiteContent(input: unknown): SiteContent {
       if (cleaned) out.packageDescriptions[id] = cleaned;
     }
   }
-  // (v7.1) Migration cho du lieu da luu tu v6: cap nhan Hero cu bi dao
-  // (nut chinh lai ghi "Xem Album Tac Pham", nut phu lai ghi "Bang Gia &
-  // Dat Lich") trong khi Hero.tsx noi nut chinh -> mo form dat lich, nut
-  // phu -> cuon xuong xem album. Chi sua default trong code thi web van
-  // doc gia tri cu da luu tren Firestore/localStorage nen loi van con —
-  // gap dung cap cu nay thi tu doi lai cho dung truoc khi tra ve.
+  // (v7.2) Migration cho du lieu da luu: Yen quyet nut chinh Hero la
+  // "Xem Album Tac Pham" (cuon xuong xem album) vi tren web da co nhieu
+  // nut dat lich; nut phu la "Dat Lich Chup" (mo form dat lich).
+  // - Cap v7.1 (primary "Dat Lich Chup" + secondary "Xem Album Tac
+  //   Pham"): hoan doi 2 gia tri.
+  // - Cap v6 (primary "Xem Album Tac Pham" + secondary "Bang Gia &
+  //   Dat Lich"): secondary doi thanh "Dat Lich Chup", primary giu nguyen.
   if (
-    out.heroPrimaryCta.trim() === 'Xem Album Tác Phẩm' &&
-    out.heroSecondaryCta.trim() === 'Bảng Giá & Đặt Lịch'
+    out.heroPrimaryCta.trim().includes('Đặt Lịch') &&
+    out.heroSecondaryCta.trim().includes('Album')
   ) {
-    out.heroPrimaryCta = 'Đặt Lịch Chụp';
-    out.heroSecondaryCta = 'Xem Album Tác Phẩm';
+    const tmp = out.heroPrimaryCta;
+    out.heroPrimaryCta = out.heroSecondaryCta;
+    out.heroSecondaryCta = tmp;
+  }
+  if (out.heroSecondaryCta.trim() === 'Bảng Giá & Đặt Lịch') {
+    out.heroSecondaryCta = 'Đặt Lịch Chụp';
   }
   return out;
 }

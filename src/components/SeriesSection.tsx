@@ -6,7 +6,7 @@
 import React from 'react';
 import { MapPin, CalendarCheck, X } from 'lucide-react';
 import { PHOTO_SERIES, INITIAL_PHOTOS, PhotoSeries } from '../data/portfolioData';
-import { SERIES_PACKAGE, getPackageDetails, BookingInquiry, PhotoItem, DEFAULT_PACKAGE_PRICES, type PackagePrices } from '../utils/portfolioLogic';
+import { SERIES_PACKAGE, getPackageDetails, BookingInquiry, PhotoItem, DEFAULT_PACKAGE_PRICES, describePhotoAlt, type PackagePrices } from '../utils/portfolioLogic';
 import { DEFAULT_SITE_CONTENT, type SiteContent } from '../config/content';
 
 interface SeriesSectionProps {
@@ -91,7 +91,7 @@ export const SeriesSection: React.FC<SeriesSectionProps> = ({
               >
                 <img
                   src={series.coverImage}
-                  alt={series.vietnameseTitle}
+                  alt={describePhotoAlt(series)}
                   className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-103"
                   referrerPolicy="no-referrer"
                 />

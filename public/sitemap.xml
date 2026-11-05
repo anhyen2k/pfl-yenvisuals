@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/tac-pham</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/bo-suu-tap</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/ve-toi</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/lien-he</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/dat-lich</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/</loc><lastmod>2026-11-05</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/tac-pham</loc><lastmod>2026-11-05</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/bo-suu-tap</loc><lastmod>2026-11-05</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/ve-toi</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/lien-he</loc><lastmod>2026-11-05</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://anhyen2k.github.io/pfl-yenvisuals/dat-lich</loc><lastmod>2026-11-05</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
 </urlset>

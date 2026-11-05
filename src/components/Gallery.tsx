@@ -14,7 +14,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
-import { PhotoItem, PhotoCategory } from '../utils/portfolioLogic';
+import { PhotoItem, PhotoCategory, describePhotoAlt } from '../utils/portfolioLogic';
 import { SITE_CONFIG } from '../config/site';
 
 interface GalleryProps {
@@ -229,7 +229,7 @@ export const Gallery: React.FC<GalleryProps> = ({
                 >
                   <img
                     src={photo.thumbUrl || photo.image}
-                    alt={photo.vietnameseTitle}
+                    alt={describePhotoAlt(photo)}
                     loading="lazy"
                     decoding="async"
                     className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-104"
